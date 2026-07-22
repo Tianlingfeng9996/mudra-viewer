@@ -43,8 +43,8 @@
       }
       @media (max-width: 640px) {
         #tabs { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 20; height: 48px; }
-        #tabs button { flex: 1; font-size: 15px; }
-        #plots, #spectrum, #manifold, #spikes { padding-bottom: 64px; }
+        #tabs button { flex: 1; min-width: 0; padding-inline: 6px; font-size: 13px; }
+        #plots, #spectrum, #manifold, #spikes, #myoarm { padding-bottom: 64px; }
       }
       #connect:disabled, #play:disabled, #record:disabled { background: #e0ddd0; color: #a5a294; cursor: not-allowed; }
       #connect.connected { background: #b5482f; }
@@ -115,6 +115,29 @@
       #manifold[hidden] { display: none; }
       #spikes { flex: 1; position: relative; min-height: 0; }
       #spikes[hidden] { display: none; }
+      #myoarm {
+        flex: 1; min-height: 0; overflow: auto; padding: 28px;
+      }
+      #myoarm[hidden] { display: none; }
+      .myoarm-header { margin: 0 auto 20px; max-width: 1100px; }
+      .myoarm-header h2 { margin: 0 0 4px; font-size: 22px; }
+      .myoarm-header p { margin: 0; color: #6b6858; }
+      .myoarm-grid {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px; max-width: 1100px; margin: 0 auto;
+      }
+      .myoarm-card {
+        min-height: 150px; padding: 20px; border: 1px dashed #c9c5b7;
+        border-radius: 10px; background: #faf9f5;
+      }
+      .myoarm-card h3 { margin: 0 0 8px; font-size: 16px; }
+      .myoarm-card p { margin: 0; color: #8a877a; }
+      .myoarm-card:last-child { grid-column: 1 / -1; min-height: 220px; }
+      @media (max-width: 700px) {
+        #myoarm { padding: 20px 14px 76px; }
+        .myoarm-grid { grid-template-columns: 1fr; }
+        .myoarm-card:last-child { grid-column: auto; }
+      }
       #spikes-info {
         position: absolute; bottom: 12px; right: 12px; z-index: 1;
         width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
@@ -171,6 +194,7 @@
         <button id="tab-freq">Frequency</button>
         <button id="tab-manifold">Manifold</button>
         <button id="tab-spikes">Spike</button>
+        <button id="tab-myoarm">MyoArm</button>
       </div>
       <span id="status" data-tip="Not connected"></span>
       <span id="play-wrap">
@@ -219,6 +243,34 @@
         <button id="spikes-dialog-close">Close</button>
       </dialog>
     </div>
+    <section id="myoarm" hidden aria-labelledby="myoarm-title">
+      <div class="myoarm-header">
+        <h2 id="myoarm-title">MyoArm workspace</h2>
+        <p>Hardware integration will be added later. These areas are placeholders for the MyoArm workflow.</p>
+      </div>
+      <div class="myoarm-grid">
+        <article class="myoarm-card">
+          <h3>EMG streaming</h3>
+          <p>Live EMG signal controls and preview will appear here.</p>
+        </article>
+        <article class="myoarm-card">
+          <h3>Recording</h3>
+          <p>Session recording controls and metadata will appear here.</p>
+        </article>
+        <article class="myoarm-card">
+          <h3>Model training</h3>
+          <p>Dataset selection and training progress will appear here.</p>
+        </article>
+        <article class="myoarm-card">
+          <h3>Inference</h3>
+          <p>Real-time prediction output will appear here.</p>
+        </article>
+        <article class="myoarm-card">
+          <h3>Hand visualization</h3>
+          <p>The inferred hand pose visualization will appear here.</p>
+        </article>
+      </div>
+    </section>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

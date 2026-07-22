@@ -49,6 +49,7 @@ const tabTime = $<HTMLButtonElement>("tab-time");
 const tabFreq = $<HTMLButtonElement>("tab-freq");
 const tabManifold = $<HTMLButtonElement>("tab-manifold");
 const tabSpikes = $<HTMLButtonElement>("tab-spikes");
+const tabMyoArm = $<HTMLButtonElement>("tab-myoarm");
 const tabsIndicator = $("tabs-indicator");
 const spectrumEl = $("spectrum");
 const specCanvas = $<HTMLCanvasElement>("spec");
@@ -62,6 +63,7 @@ const spikesCanvas = $<HTMLCanvasElement>("spikes-canvas");
 const spikesInfoBtn = $<HTMLButtonElement>("spikes-info");
 const spikesDialog = $<HTMLDialogElement>("spikes-dialog");
 const spikesDialogClose = $<HTMLButtonElement>("spikes-dialog-close");
+const myoArmEl = $("myoarm");
 // ponytail: manifold info dialog disabled, HTML commented out in index.html
 // const manifoldInfoBtn = $<HTMLButtonElement>("manifold-info");
 // const manifoldDialog = $<HTMLDialogElement>("manifold-dialog");
@@ -120,14 +122,14 @@ for (let c = 0; c < CH; c++) {
   canvases.push(canvas);
 }
 
-// --- View toggle (Time / Frequency / Manifold), both off the same Stream ---
-// Each tab is also a shareable route (/time, /freq, /manifold) with working back/forward; navigation stays client-side so switching views never drops the live BLE connection.
+// --- View toggle ---
+// Each tab is also a shareable route with working back/forward; navigation stays client-side so switching views never drops the live BLE connection.
 // GH Pages has no server-side SPA fallback, so the build copies index.html to 404.html (see package.json) to serve direct hits.
 specLegend.innerHTML = LABELS.map(
   (l, i) => `<span style="color:${COLORS[i]}">${l}</span>`,
 ).join("");
-type View = "time" | "freq" | "manifold" | "spikes";
-const VIEWS: View[] = ["time", "freq", "manifold", "spikes"];
+type View = "time" | "freq" | "manifold" | "spikes" | "myoarm";
+const VIEWS: View[] = ["time", "freq", "manifold", "spikes", "myoarm"];
 const pathForView = (v: View) => import.meta.env.BASE_URL + v;
 const viewFromPath = (pathname: string): View => {
   const rel = pathname.slice(import.meta.env.BASE_URL.length).replace(/\/$/, "");
@@ -153,11 +155,13 @@ function setView(v: View) {
   tabFreq.classList.toggle("active", v === "freq");
   tabManifold.classList.toggle("active", v === "manifold");
   tabSpikes.classList.toggle("active", v === "spikes");
+  tabMyoArm.classList.toggle("active", v === "myoarm");
   moveTabIndicator();
   plotsEl.hidden = v !== "time";
   spectrumEl.hidden = v !== "freq";
   manifoldEl.hidden = v !== "manifold";
   spikesEl.hidden = v !== "spikes";
+  myoArmEl.hidden = v !== "myoarm";
   if (v === "manifold") manifoldView.reset(); // fresh point cloud each time the tab opens
   // fresh live state; learn W on first open. Defer the kickoff to a microtask so a direct landing
   // on /spikes (setView runs during module init) doesn't touch engine state (M) still in its TDZ.
@@ -194,6 +198,7 @@ tabTime.addEventListener("click", () => navigate("time"));
 tabFreq.addEventListener("click", () => navigate("freq"));
 tabManifold.addEventListener("click", () => navigate("manifold"));
 tabSpikes.addEventListener("click", () => navigate("spikes"));
+tabMyoArm.addEventListener("click", () => navigate("myoarm"));
 spikesInfoBtn.addEventListener("click", () => spikesDialog.showModal());
 spikesDialogClose.addEventListener("click", () => spikesDialog.close());
 
@@ -264,7 +269,7 @@ function draw() {
   if (view === "freq") spectrumView.draw(M, specPtr, stream, CH, RATE);
   else if (view === "manifold") manifoldView.draw(M, specPtr, stream, CH);
   else if (view === "spikes") spikesView.draw(spikesStatus);
-  else drawTime(canvases, rings, writeIdx, COLORS);
+  else if (view === "time") drawTime(canvases, rings, writeIdx, COLORS);
   requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);
