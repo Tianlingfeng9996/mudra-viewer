@@ -10,6 +10,10 @@ import {
 import type { CollectorSnapshot } from "../myoarm/collector";
 import type { MyoArmSegment } from "../myoarm/types";
 import {
+  prepareMyoArmDataset,
+  type PreprocessingIssueCode,
+} from "../myoarm/preprocessing";
+import {
   calculateChannelStatistics,
   createMyoArmSegmentPlot,
 } from "./myoarm-segment";
@@ -139,9 +143,21 @@ export function createMyoArmView(
           </p>
         </div>
       </article>
-      <article class="myoarm-card">
+      <article class="myoarm-card ready myoarm-training-card">
+        <span class="myoarm-state" data-role="preprocessing-state">No windows</span>
         <h3>Model training</h3>
-        <p>Dataset export, preprocessing, and browser-based training will build on the locally saved segments.</p>
+        <p>Shared preprocessing prepares the same input shape for offline training and future live inference.</p>
+        <dl class="myoarm-preprocessing-stats">
+          <div><dt>Usable segments</dt><dd data-role="preprocessing-segments">0</dd></div>
+          <div><dt>Skipped segments</dt><dd data-role="preprocessing-skipped">0</dd></div>
+          <div><dt>Prepared windows</dt><dd data-role="preprocessing-windows">0</dd></div>
+          <div><dt>Values / window</dt><dd data-role="preprocessing-inputs">0</dd></div>
+        </dl>
+        <p class="myoarm-preprocessing-rule" data-role="preprocessing-rule"></p>
+        <div class="myoarm-label-distribution" data-role="label-distribution"></div>
+        <p class="myoarm-preprocessing-warning" data-role="preprocessing-warning">
+          Collect or import accepted segments to prepare model inputs.
+        </p>
       </article>
       <article class="myoarm-card">
         <h3>Inference</h3>
@@ -203,6 +219,22 @@ export function createMyoArmView(
   const waveformCanvas =
     root.querySelector<HTMLCanvasElement>("[data-role=segment-waveform]")!;
   const segmentPlot = createMyoArmSegmentPlot(waveformCanvas);
+  const preprocessingStateEl =
+    root.querySelector<HTMLElement>("[data-role=preprocessing-state]")!;
+  const preprocessingSegmentsEl =
+    root.querySelector<HTMLElement>("[data-role=preprocessing-segments]")!;
+  const preprocessingSkippedEl =
+    root.querySelector<HTMLElement>("[data-role=preprocessing-skipped]")!;
+  const preprocessingWindowsEl =
+    root.querySelector<HTMLElement>("[data-role=preprocessing-windows]")!;
+  const preprocessingInputsEl =
+    root.querySelector<HTMLElement>("[data-role=preprocessing-inputs]")!;
+  const preprocessingRuleEl =
+    root.querySelector<HTMLElement>("[data-role=preprocessing-rule]")!;
+  const labelDistributionEl =
+    root.querySelector<HTMLElement>("[data-role=label-distribution]")!;
+  const preprocessingWarningEl =
+    root.querySelector<HTMLElement>("[data-role=preprocessing-warning]")!;
 
   fixtureSelect.replaceChildren(
     ...options.fixtures.map((fixture) => {
@@ -233,6 +265,72 @@ export function createMyoArmView(
   let persistenceStatus: PersistenceStatus = "loading";
   let storedSegmentCount = 0;
   let selectedSegmentId: string | null = null;
+
+  const preprocessingIssueLabel: Record<PreprocessingIssueCode, string> = {
+    "quality-rejected": "quality rejected",
+    "sample-rate-mismatch": "sample rate mismatch",
+    "channel-order-mismatch": "channel order mismatch",
+    "sample-layout-mismatch": "sample layout mismatch",
+    "too-short": "too short",
+  };
+
+  const renderPreprocessingSummary = (
+    segments: readonly MyoArmSegment[],
+  ) => {
+    const prepared = prepareMyoArmDataset(segments);
+    const { config, summary } = prepared;
+    preprocessingStateEl.textContent = summary.windowCount
+      ? "Windows ready"
+      : "No windows";
+    preprocessingStateEl.classList.toggle(
+      "live",
+      summary.windowCount > 0,
+    );
+    preprocessingSegmentsEl.textContent =
+      summary.usableSegmentCount.toLocaleString();
+    preprocessingSkippedEl.textContent =
+      summary.skippedSegmentCount.toLocaleString();
+    preprocessingWindowsEl.textContent =
+      summary.windowCount.toLocaleString();
+    preprocessingInputsEl.textContent =
+      summary.inputValueCount.toLocaleString();
+    preprocessingRuleEl.textContent =
+      `${config.windowDurationMs} ms window (${config.windowSampleCount} samples) · ` +
+      `${config.strideDurationMs} ms stride (${config.strideSampleCount} samples) · ` +
+      `sample-major ${config.channels.join(" / ")} · divide by 32,768`;
+
+    const labelCounts = Object.entries(summary.windowsByLabel).filter(
+      ([, count]) => count > 0,
+    );
+    labelDistributionEl.replaceChildren(
+      ...(labelCounts.length
+        ? labelCounts.map(([label, count]) => {
+            const item = document.createElement("span");
+            item.textContent = `${label}: ${count.toLocaleString()}`;
+            return item;
+          })
+        : [Object.assign(document.createElement("span"), {
+            textContent: "No labelled windows",
+          })]),
+    );
+
+    if (!summary.windowCount) {
+      preprocessingWarningEl.textContent =
+        "Collect or import accepted segments to prepare model inputs.";
+    } else if (summary.issues.length) {
+      const reasons = Array.from(
+        new Set(
+          summary.issues.map((issue) => preprocessingIssueLabel[issue.code]),
+        ),
+      );
+      preprocessingWarningEl.textContent =
+        `${summary.skippedSegmentCount.toLocaleString()} segment(s) skipped: ${reasons.join(", ")}. ` +
+        "Overlapping windows remain grouped by segment for future dataset splitting.";
+    } else {
+      preprocessingWarningEl.textContent =
+        "Pipeline check only: overlapping windows remain grouped by segment. Fixtures must not be used to claim model accuracy.";
+    }
+  };
 
   const renderSegmentPreview = (segment: MyoArmSegment | null) => {
     selectedSegmentId = segment?.id ?? null;
@@ -355,6 +453,7 @@ export function createMyoArmView(
 
     setCollectedSegments(segments) {
       storedSegmentCount = segments.length;
+      renderPreprocessingSummary(segments);
       if (!segments.length) {
         selectedSegmentId = null;
         segmentListEl.innerHTML =

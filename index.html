@@ -257,6 +257,31 @@
       .myoarm-card .myoarm-preview-note {
         margin-top: 10px; color: #8a877a; font-size: 11px;
       }
+      .myoarm-training-card { min-height: 0; }
+      .myoarm-preprocessing-stats {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px; margin: 14px 0 10px;
+      }
+      .myoarm-preprocessing-stats div {
+        padding: 8px 10px; border-radius: 6px; background: #f2f0e8;
+      }
+      .myoarm-preprocessing-stats dt { color: #8a877a; font-size: 11px; }
+      .myoarm-preprocessing-stats dd {
+        margin: 2px 0 0; color: #3d3d3a; font-weight: 600;
+      }
+      .myoarm-card .myoarm-preprocessing-rule {
+        color: #6b6858; font-size: 11px;
+      }
+      .myoarm-label-distribution {
+        display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px;
+      }
+      .myoarm-label-distribution span {
+        padding: 3px 7px; border-radius: 999px;
+        background: #e8f0fa; color: #214f88; font-size: 11px;
+      }
+      .myoarm-card .myoarm-preprocessing-warning {
+        margin-top: 10px; color: #8a6d3b; font-size: 11px;
+      }
       .myoarm-card:last-child { grid-column: 1 / -1; min-height: 220px; }
       @media (max-width: 700px) {
         #myoarm { padding: 20px 14px 76px; }

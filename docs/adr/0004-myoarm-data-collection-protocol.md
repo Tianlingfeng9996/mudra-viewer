@@ -88,6 +88,30 @@ train, validation, or test partition. Splitting individual windows randomly
 would leak nearly identical signal into multiple partitions and inflate
 metrics.
 
+### Shared preprocessing v1
+
+Offline training and live inference use the same versioned transform,
+`myoarm-raw-window-v1`:
+
+- accepted segments only;
+- fixed `ulnar`, `median`, `radial` channel order at 834 Hz;
+- 200 ms windows (167 samples) with a 100 ms stride (83 samples);
+- sample-major interleaved Float32 model inputs;
+- each raw value divided by the signed 16-bit full scale, 32,768;
+- no clipping, per-window standardization, filtering, padding, or fitted
+  dataset statistics;
+- incomplete segment tails are dropped.
+
+Fixed full-scale conversion makes the first transform deterministic and usable
+before a representative training set exists. It also avoids leaking
+validation/test statistics into preprocessing. Amplitude information remains
+available for effort-sensitive models, and values beyond the nominal device
+range remain visible instead of being silently clipped.
+
+Every prepared window carries its parent segment as a grouping identifier.
+Future dataset splitting must assign whole segment or session groups to one
+partition before any ANN or TF2AngleNet performance is reported.
+
 ## Consequences
 
 - Data collection, storage, and training UI can be implemented without waiting
@@ -107,5 +131,8 @@ metrics.
 - Dataset export and import use a validated, store-only ZIP archive. Import
   replaces the matching local fixture dataset atomically after user
   confirmation.
-- The next implementation step is shared preprocessing for offline training
-  and live inference.
+- Shared preprocessing now produces deterministic fixed-size inputs for both
+  the baseline ANN and TF2AngleNet integration.
+- The next implementation step is a grouped dataset split and a minimal
+  baseline ANN training loop; fixture runs can verify execution but not
+  performance.
