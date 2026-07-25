@@ -9,6 +9,10 @@ import {
 } from "../signal/types";
 import type { CollectorSnapshot } from "../myoarm/collector";
 import type { MyoArmSegment } from "../myoarm/types";
+import {
+  calculateChannelStatistics,
+  createMyoArmSegmentPlot,
+} from "./myoarm-segment";
 
 export interface MyoArmView {
   acceptSamples(chunk: SampleChunk): void;
@@ -103,6 +107,38 @@ export function createMyoArmView(
           </ul>
         </div>
       </article>
+      <article class="myoarm-card ready myoarm-inspector">
+        <div class="myoarm-inspector-header">
+          <div>
+            <h3>Saved segment inspector</h3>
+            <p>Select a saved segment to inspect its unprocessed samples before preprocessing or training.</p>
+          </div>
+          <span class="myoarm-quality" data-role="preview-quality">No selection</span>
+        </div>
+        <div class="myoarm-preview-empty" data-role="preview-empty">
+          Collect or import a segment, then select it from the list above.
+        </div>
+        <div data-role="preview-content" hidden>
+          <dl class="myoarm-preview-meta">
+            <div><dt>Gesture</dt><dd data-role="preview-gesture">—</dd></div>
+            <div><dt>Effort</dt><dd data-role="preview-effort">—</dd></div>
+            <div><dt>Repetition</dt><dd data-role="preview-repetition">—</dd></div>
+            <div><dt>Duration</dt><dd data-role="preview-duration">—</dd></div>
+            <div><dt>Samples</dt><dd data-role="preview-samples">—</dd></div>
+            <div><dt>Sample rate</dt><dd data-role="preview-rate">—</dd></div>
+            <div><dt>Quality flags</dt><dd data-role="preview-flags">—</dd></div>
+            <div><dt>Segment ID</dt><dd data-role="preview-id">—</dd></div>
+          </dl>
+          <div class="myoarm-waveform-wrap">
+            <canvas data-role="segment-waveform"></canvas>
+          </div>
+          <div class="myoarm-channel-stats" data-role="channel-stats"></div>
+          <p class="myoarm-preview-note">
+            Raw decoded counts are shown without filtering, normalization, or calibration to µV.
+            Boundary hits report samples at the signed 16-bit limits and do not change the saved quality decision.
+          </p>
+        </div>
+      </article>
       <article class="myoarm-card">
         <h3>Model training</h3>
         <p>Dataset export, preprocessing, and browser-based training will build on the locally saved segments.</p>
@@ -140,6 +176,33 @@ export function createMyoArmView(
     root.querySelector<HTMLInputElement>("[data-role=import-file]")!;
   const segmentListEl =
     root.querySelector<HTMLUListElement>("[data-role=segment-list]")!;
+  const previewQualityEl =
+    root.querySelector<HTMLElement>("[data-role=preview-quality]")!;
+  const previewEmptyEl =
+    root.querySelector<HTMLElement>("[data-role=preview-empty]")!;
+  const previewContentEl =
+    root.querySelector<HTMLElement>("[data-role=preview-content]")!;
+  const previewGestureEl =
+    root.querySelector<HTMLElement>("[data-role=preview-gesture]")!;
+  const previewEffortEl =
+    root.querySelector<HTMLElement>("[data-role=preview-effort]")!;
+  const previewRepetitionEl =
+    root.querySelector<HTMLElement>("[data-role=preview-repetition]")!;
+  const previewDurationEl =
+    root.querySelector<HTMLElement>("[data-role=preview-duration]")!;
+  const previewSamplesEl =
+    root.querySelector<HTMLElement>("[data-role=preview-samples]")!;
+  const previewRateEl =
+    root.querySelector<HTMLElement>("[data-role=preview-rate]")!;
+  const previewFlagsEl =
+    root.querySelector<HTMLElement>("[data-role=preview-flags]")!;
+  const previewIdEl =
+    root.querySelector<HTMLElement>("[data-role=preview-id]")!;
+  const channelStatsEl =
+    root.querySelector<HTMLElement>("[data-role=channel-stats]")!;
+  const waveformCanvas =
+    root.querySelector<HTMLCanvasElement>("[data-role=segment-waveform]")!;
+  const segmentPlot = createMyoArmSegmentPlot(waveformCanvas);
 
   fixtureSelect.replaceChildren(
     ...options.fixtures.map((fixture) => {
@@ -169,6 +232,76 @@ export function createMyoArmView(
   let collectorStatus: CollectorSnapshot["status"] = "idle";
   let persistenceStatus: PersistenceStatus = "loading";
   let storedSegmentCount = 0;
+  let selectedSegmentId: string | null = null;
+
+  const renderSegmentPreview = (segment: MyoArmSegment | null) => {
+    selectedSegmentId = segment?.id ?? null;
+    previewEmptyEl.hidden = Boolean(segment);
+    previewContentEl.hidden = !segment;
+    previewQualityEl.classList.toggle(
+      "review",
+      Boolean(segment && !segment.quality.accepted),
+    );
+
+    if (!segment) {
+      previewQualityEl.textContent = "No selection";
+      channelStatsEl.replaceChildren();
+      segmentPlot.draw(null);
+      return;
+    }
+
+    previewQualityEl.textContent = segment.quality.accepted
+      ? "Accepted"
+      : "Needs review";
+    previewGestureEl.textContent = segment.label;
+    previewEffortEl.textContent = segment.effort;
+    previewRepetitionEl.textContent =
+      segment.repetition.toLocaleString();
+    previewDurationEl.textContent =
+      `${(segment.durationMs / 1_000).toFixed(3)} s`;
+    previewSamplesEl.textContent = segment.sampleCount.toLocaleString();
+    previewRateEl.textContent = `${segment.sampleRateHz.toLocaleString()} Hz`;
+    previewFlagsEl.textContent = segment.quality.flags.length
+      ? segment.quality.flags.join(", ")
+      : "None";
+    previewIdEl.textContent = segment.id;
+
+    channelStatsEl.replaceChildren(
+      ...calculateChannelStatistics(segment).map((statistics) => {
+        const card = document.createElement("section");
+        card.className = "myoarm-channel-stat";
+        const heading = document.createElement("h4");
+        heading.textContent = statistics.channel;
+        const details = document.createElement("dl");
+        const rows: Array<[string, string]> = [
+          ["Minimum", statistics.minimum.toLocaleString()],
+          ["Maximum", statistics.maximum.toLocaleString()],
+          ["Peak-to-peak", statistics.peakToPeak.toLocaleString()],
+          [
+            "RMS",
+            statistics.rms.toLocaleString(undefined, {
+              maximumFractionDigits: 1,
+            }),
+          ],
+          ["Boundary hits", statistics.boundaryHits.toLocaleString()],
+        ];
+        details.replaceChildren(
+          ...rows.map(([label, value]) => {
+            const row = document.createElement("div");
+            const term = document.createElement("dt");
+            const description = document.createElement("dd");
+            term.textContent = label;
+            description.textContent = value;
+            row.append(term, description);
+            return row;
+          }),
+        );
+        card.append(heading, details);
+        return card;
+      }),
+    );
+    segmentPlot.draw(segment);
+  };
 
   const updateCollectionControls = () => {
     const collecting = collectorStatus === "collecting";
@@ -223,23 +356,51 @@ export function createMyoArmView(
     setCollectedSegments(segments) {
       storedSegmentCount = segments.length;
       if (!segments.length) {
+        selectedSegmentId = null;
         segmentListEl.innerHTML =
           "<li>No saved segments in the local fixture dataset.</li>";
+        renderSegmentPreview(null);
         updateCollectionControls();
         return;
       }
 
+      const selectedSegment =
+        segments.find((segment) => segment.id === selectedSegmentId) ??
+        segments[segments.length - 1];
       segmentListEl.replaceChildren(
         ...segments.map((collected) => {
           const item = document.createElement("li");
+          const button = document.createElement("button");
           const duration = (collected.durationMs / 1_000).toFixed(2);
           const quality = collected.quality.accepted ? "accepted" : "review";
-          item.textContent =
+          button.type = "button";
+          button.className = "myoarm-segment-button";
+          button.classList.toggle(
+            "selected",
+            collected.id === selectedSegment.id,
+          );
+          button.setAttribute(
+            "aria-pressed",
+            String(collected.id === selectedSegment.id),
+          );
+          button.textContent =
             `${collected.label} · ${collected.effort} · repetition ${collected.repetition} · ` +
             `${collected.sampleCount.toLocaleString()} samples · ${duration} s · ${quality}`;
+          button.addEventListener("click", () => {
+            renderSegmentPreview(collected);
+            for (const candidate of segmentListEl.querySelectorAll(
+              ".myoarm-segment-button",
+            )) {
+              const isSelected = candidate === button;
+              candidate.classList.toggle("selected", isSelected);
+              candidate.setAttribute("aria-pressed", String(isSelected));
+            }
+          });
+          item.append(button);
           return item;
         }),
       );
+      renderSegmentPreview(selectedSegment);
       updateCollectionControls();
     },
 

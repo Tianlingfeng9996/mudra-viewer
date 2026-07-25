@@ -189,14 +189,83 @@
       }
       .myoarm-card .myoarm-segment-list {
         grid-column: 1 / -1; max-height: 150px; overflow: auto;
-        margin: 0; padding: 8px 8px 8px 26px; border-radius: 6px;
+        margin: 0; padding: 6px; border-radius: 6px; list-style: none;
         background: #f2f0e8; font-size: 12px;
+      }
+      .myoarm-segment-list li + li { margin-top: 3px; }
+      .myoarm-collector .myoarm-segment-button {
+        width: 100%; padding: 7px 9px; border: 1px solid transparent;
+        border-radius: 5px; background: transparent; color: #6b6858;
+        font: inherit; font-weight: 400; text-align: left; cursor: pointer;
+      }
+      .myoarm-collector .myoarm-segment-button:hover {
+        background: #faf9f5; color: #3d3d3a;
+      }
+      .myoarm-collector .myoarm-segment-button.selected {
+        border-color: #9bb8dd; background: #e8f0fa; color: #214f88;
+      }
+      .myoarm-inspector { grid-column: 1 / -1; min-height: 0; }
+      .myoarm-inspector-header {
+        display: flex; align-items: flex-start; justify-content: space-between;
+        gap: 16px; margin-bottom: 14px;
+      }
+      .myoarm-quality {
+        flex: 0 0 auto; padding: 3px 9px; border-radius: 999px;
+        background: #e5f2e9; color: #287249; font-size: 11px;
+        font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase;
+      }
+      .myoarm-quality.review { background: #fbf0d9; color: #8a6d3b; }
+      .myoarm-preview-empty {
+        display: grid; min-height: 160px; place-items: center;
+        border: 1px dashed #c9c5b7; border-radius: 8px;
+        color: #8a877a; text-align: center;
+      }
+      .myoarm-preview-empty[hidden] { display: none; }
+      .myoarm-preview-meta {
+        display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px; margin: 0 0 12px;
+      }
+      .myoarm-preview-meta div {
+        min-width: 0; padding: 8px 10px; border-radius: 6px;
+        background: #f2f0e8;
+      }
+      .myoarm-preview-meta dt { color: #8a877a; font-size: 11px; }
+      .myoarm-preview-meta dd {
+        overflow: hidden; margin: 2px 0 0; color: #3d3d3a;
+        font-weight: 600; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .myoarm-waveform-wrap {
+        height: 360px; overflow: hidden; border: 1px solid #e8e6dd;
+        border-radius: 8px; background: #fff;
+      }
+      .myoarm-waveform-wrap canvas { width: 100%; height: 100%; }
+      .myoarm-channel-stats {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px; margin-top: 12px;
+      }
+      .myoarm-channel-stat {
+        padding: 10px; border: 1px solid #e8e6dd; border-radius: 7px;
+        background: #fff;
+      }
+      .myoarm-channel-stat h4 { margin: 0 0 6px; font-size: 13px; }
+      .myoarm-channel-stat dl { margin: 0; }
+      .myoarm-channel-stat dl div {
+        display: flex; justify-content: space-between; gap: 8px;
+        padding: 2px 0; color: #6b6858; font-size: 11px;
+      }
+      .myoarm-channel-stat dd { margin: 0; color: #3d3d3a; font-weight: 600; }
+      .myoarm-card .myoarm-preview-note {
+        margin-top: 10px; color: #8a877a; font-size: 11px;
       }
       .myoarm-card:last-child { grid-column: 1 / -1; min-height: 220px; }
       @media (max-width: 700px) {
         #myoarm { padding: 20px 14px 76px; }
         .myoarm-grid { grid-template-columns: 1fr; }
         .myoarm-card:last-child { grid-column: auto; }
+        .myoarm-inspector { grid-column: auto; }
+        .myoarm-preview-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .myoarm-channel-stats { grid-template-columns: 1fr; }
+        .myoarm-waveform-wrap { height: 420px; }
       }
       #spikes-info {
         position: absolute; bottom: 12px; right: 12px; z-index: 1;
