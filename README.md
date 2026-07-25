@@ -1,6 +1,6 @@
 # mudra-viewer
 
-[![Deploy to GitHub Pages](https://github.com/ttktjmt/mudra-viewer/actions/workflows/deploy.yml/badge.svg)](https://github.com/ttktjmt/mudra-viewer/actions/workflows/deploy.yml)
+[![Deploy to GitHub Pages](https://github.com/Tianlingfeng9996/mudra-viewer/actions/workflows/deploy.yml/badge.svg?branch=feature%2Fmyoarm-data-pipeline)](https://github.com/Tianlingfeng9996/mudra-viewer/actions/workflows/deploy.yml)
 
 Realtime EMG Signal Viewer for Mudra Link
 
@@ -12,6 +12,8 @@ Realtime EMG Signal Viewer for Mudra Link
 <p align="center">
   <em>Check out the app ― <a href="https://ttktjmt.github.io/mudra-viewer/">ttktjmt.github.io/mudra-viewer</a></em>
 </p>
+
+> **MyoArm data-pipeline preview:** [Open the current feature build](https://tianlingfeng9996.github.io/mudra-viewer/myoarm)
 
 A static web app that connects to a Mudra Link directly from the browser over
 Web Bluetooth and shows its 3-channel sEMG waveforms in real time (~834 Hz).
