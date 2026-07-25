@@ -13,7 +13,16 @@ import {
   type SampleChunk,
 } from "./signal/types";
 import { createSegmentCollector } from "./myoarm/collector";
-import { CAPTURE_PROTOCOL_V1, classifyFixtureName } from "./myoarm/protocol";
+import {
+  CAPTURE_PROTOCOL_V1,
+  MYOARM_DATASET_SCHEMA_VERSION,
+  classifyFixtureName,
+} from "./myoarm/protocol";
+import {
+  createMyoArmStorage,
+  type MyoArmDatasetMetadata,
+  type MyoArmSessionMetadata,
+} from "./myoarm/storage";
 import type { GestureLabel, MyoArmSegment } from "./myoarm/types";
 import { zip } from "./zip";
 
@@ -121,10 +130,35 @@ let writeIdx = 0; // next write position; total count is unbounded but we only k
 const sampleQueue: number[][] = [];
 const sampleHub = createSampleHub<SampleChunk>();
 const segmentCollector = createSegmentCollector();
+const myoArmStorage = createMyoArmStorage();
 const collectedSegments: MyoArmSegment[] = [];
+const fixtureDatasetId = "myoarm-fixture-sandbox-v1";
 const fixtureSessionId = crypto.randomUUID();
 const fixtureSessionStartedAt = performance.now();
+const fixtureSessionStartedAtIso = new Date().toISOString();
 const fixtureRepetitions = new Map<GestureLabel, number>();
+const fixtureDataset: MyoArmDatasetMetadata = {
+  schemaVersion: MYOARM_DATASET_SCHEMA_VERSION,
+  id: fixtureDatasetId,
+  name: "Built-in fixture sandbox",
+  createdAt: fixtureSessionStartedAtIso,
+  updatedAt: fixtureSessionStartedAtIso,
+  labelSet: CAPTURE_PROTOCOL_V1.labels,
+};
+const fixtureSession: MyoArmSessionMetadata = {
+  id: fixtureSessionId,
+  datasetId: fixtureDatasetId,
+  participantId: "fixture-demo",
+  source: "fixture",
+  sourceName: "Built-in fixtures",
+  armSide: "unknown",
+  startedAt: fixtureSessionStartedAtIso,
+  protocolId: CAPTURE_PROTOCOL_V1.id,
+  sampleRateHz: RATE,
+  channels: EMG_CHANNELS,
+  appVersion: "0.1.0",
+};
+let myoArmStorageReady = false;
 sampleHub.subscribe((chunk) => {
   const channelCount = chunk.channels.length;
   if (channelCount !== CH || chunk.samples.length % channelCount !== 0) {
@@ -177,11 +211,107 @@ const spikesView = createSpikesView(spikesCanvas);
 const myoArmView = createMyoArmView(myoArmEl, {
   fixtures: FIXTURES,
   onCollectFixture: (fixtureName) => { void collectFixture(fixtureName); },
+  onClearSavedSegments: () => { void clearSavedFixtureSegments(); },
 });
 sampleHub.subscribe((chunk) => myoArmView.acceptSamples(chunk));
 sampleHub.subscribe((chunk) => segmentCollector.acceptSamples(chunk));
 segmentCollector.subscribe((snapshot) => myoArmView.setCollectionState(snapshot));
 myoArmView.setCollectedSegments(collectedSegments);
+void restoreFixtureDataset();
+
+async function restoreFixtureDataset() {
+  myoArmStorageReady = false;
+  myoArmView.setPersistenceState(
+    "loading",
+    "Loading saved fixture segments from IndexedDB…",
+  );
+
+  try {
+    const dataset = await myoArmStorage.loadDataset(fixtureDatasetId);
+    const restoredSegments =
+      dataset?.sessions.flatMap((session) => session.segments) ?? [];
+    collectedSegments.splice(
+      0,
+      collectedSegments.length,
+      ...restoredSegments,
+    );
+    myoArmView.setCollectedSegments(collectedSegments);
+    myoArmStorageReady = true;
+    myoArmView.setPersistenceState(
+      "ready",
+      collectedSegments.length
+        ? `${collectedSegments.length.toLocaleString()} segments saved in IndexedDB`
+        : "IndexedDB ready; collected segments will survive a page refresh",
+    );
+  } catch (error) {
+    myoArmView.setPersistenceState(
+      "error",
+      `IndexedDB unavailable: ${(error as Error).message}`,
+    );
+  }
+}
+
+async function persistCollectedSegment(segment: MyoArmSegment) {
+  myoArmStorageReady = false;
+  myoArmView.setPersistenceState(
+    "saving",
+    `Saving ${segment.label} repetition ${segment.repetition}…`,
+  );
+
+  try {
+    await myoArmStorage.saveSegment(
+      fixtureDataset,
+      fixtureSession,
+      segment,
+    );
+    collectedSegments.push(segment);
+    myoArmView.setCollectedSegments(collectedSegments);
+    myoArmStorageReady = true;
+    myoArmView.setPersistenceState(
+      "ready",
+      `${collectedSegments.length.toLocaleString()} segments saved in IndexedDB`,
+    );
+  } catch (error) {
+    const message = `Collected samples could not be saved: ${(error as Error).message}`;
+    segmentCollector.reportError(message);
+    myoArmView.setPersistenceState("error", message);
+  }
+}
+
+async function clearSavedFixtureSegments() {
+  if (playing || collectingFixturePlayback) {
+    segmentCollector.reportError(
+      "Stop the current fixture collection before clearing saved segments",
+    );
+    return;
+  }
+  if (
+    !window.confirm(
+      "Delete every segment in the local built-in fixture dataset?",
+    )
+  ) {
+    return;
+  }
+
+  myoArmStorageReady = false;
+  myoArmView.setPersistenceState("saving", "Clearing saved segments…");
+  try {
+    await myoArmStorage.clearDataset(fixtureDatasetId);
+    collectedSegments.length = 0;
+    fixtureRepetitions.clear();
+    myoArmView.setCollectedSegments(collectedSegments);
+    myoArmStorageReady = true;
+    myoArmView.setPersistenceState(
+      "ready",
+      "IndexedDB ready; collected segments will survive a page refresh",
+    );
+  } catch (error) {
+    myoArmView.setPersistenceState(
+      "error",
+      `Saved segments could not be cleared: ${(error as Error).message}`,
+    );
+  }
+}
 
 function moveTabIndicator() {
   const active = document.querySelector<HTMLButtonElement>("#tabs button.active");
@@ -529,6 +659,7 @@ window.addEventListener("pagehide", () => {
 // HMR reloads leave the BLE link up; unlike pagehide, dispose() can await a full stop.
 if (import.meta.hot) {
   import.meta.hot.dispose(async () => {
+    await myoArmStorage.close();
     if (!device?.gatt?.connected) return;
     try {
       await cmdChar?.writeValue(DISABLE_SNC);
@@ -607,8 +738,7 @@ async function play(name: string): Promise<boolean> {
         const segment = segmentCollector.complete();
         collectingFixturePlayback = false;
         if (segment) {
-          collectedSegments.push(segment);
-          myoArmView.setCollectedSegments(collectedSegments);
+          void persistCollectedSegment(segment);
         }
       }
       cleanup();
@@ -631,6 +761,12 @@ function stopPlay() {
 }
 
 async function collectFixture(name: string) {
+  if (!myoArmStorageReady) {
+    segmentCollector.reportError(
+      "Local dataset storage is not ready; reload the page and try again",
+    );
+    return;
+  }
   if (playing || device?.gatt?.connected) {
     segmentCollector.reportError(
       "Stop the current playback or disconnect Bluetooth before collecting a fixture",

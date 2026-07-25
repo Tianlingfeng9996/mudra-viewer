@@ -101,5 +101,8 @@ metrics.
   are independent subscribers.
 - A fixture-fed collection state machine can capture a playback into a labelled
   in-memory `MyoArmSegment` without changing the original Play button's meaning.
-- The next implementation step is IndexedDB persistence for datasets, sessions,
-  and segments.
+- IndexedDB stores dataset, session, and segment records separately. A completed
+  fixture segment is committed with its parent metadata in one transaction and
+  restored when the page reloads.
+- The next implementation step is dataset export/import, followed by shared
+  preprocessing for offline training and live inference.

@@ -14,6 +14,10 @@ export interface MyoArmView {
   acceptSamples(chunk: SampleChunk): void;
   setCollectedSegments(segments: readonly MyoArmSegment[]): void;
   setCollectionState(snapshot: CollectorSnapshot): void;
+  setPersistenceState(
+    status: PersistenceStatus,
+    message: string,
+  ): void;
   setSourceState(
     source: CaptureSource | null,
     active: boolean,
@@ -24,7 +28,10 @@ export interface MyoArmView {
 interface MyoArmViewOptions {
   fixtures: readonly string[];
   onCollectFixture(fixtureName: string): void;
+  onClearSavedSegments(): void;
 }
+
+type PersistenceStatus = "loading" | "ready" | "saving" | "error";
 
 const sourceLabel = (source: CaptureSource | null) => {
   if (source === "bluetooth") return "Bluetooth";
@@ -74,15 +81,19 @@ export function createMyoArmView(
             <select data-role="fixture-select" aria-label="Fixture to collect"></select>
           </label>
           <button type="button" data-role="collect-fixture">Collect fixture</button>
-          <p data-role="collection-summary">Ready to collect a fixture. Results are kept in memory until IndexedDB is added.</p>
+          <p data-role="collection-summary">Ready to collect a fixture.</p>
+          <div class="myoarm-storage">
+            <span data-role="storage-summary">Opening the local dataset…</span>
+            <button type="button" data-role="clear-segments" disabled>Clear saved segments</button>
+          </div>
           <ul class="myoarm-segment-list" data-role="segment-list">
-            <li>No collected segments in this session.</li>
+            <li>No saved segments in the local fixture dataset.</li>
           </ul>
         </div>
       </article>
       <article class="myoarm-card">
         <h3>Model training</h3>
-        <p>Dataset selection and browser-based training will follow after collection and local storage are connected.</p>
+        <p>Dataset export, preprocessing, and browser-based training will build on the locally saved segments.</p>
       </article>
       <article class="myoarm-card">
         <h3>Inference</h3>
@@ -105,6 +116,10 @@ export function createMyoArmView(
     root.querySelector<HTMLButtonElement>("[data-role=collect-fixture]")!;
   const collectionSummaryEl =
     root.querySelector<HTMLElement>("[data-role=collection-summary]")!;
+  const storageSummaryEl =
+    root.querySelector<HTMLElement>("[data-role=storage-summary]")!;
+  const clearSegmentsBtn =
+    root.querySelector<HTMLButtonElement>("[data-role=clear-segments]")!;
   const segmentListEl =
     root.querySelector<HTMLUListElement>("[data-role=segment-list]")!;
 
@@ -116,16 +131,29 @@ export function createMyoArmView(
       return option;
     }),
   );
-  collectFixtureBtn.disabled = options.fixtures.length === 0;
   collectFixtureBtn.addEventListener("click", () => {
     if (fixtureSelect.value) options.onCollectFixture(fixtureSelect.value);
   });
+  clearSegmentsBtn.addEventListener("click", options.onClearSavedSegments);
 
   let activeSource: CaptureSource | null = null;
   let activeSourceName = "";
   let active = false;
   let sampleCount = 0;
   let renderRaf = 0;
+  let collectorStatus: CollectorSnapshot["status"] = "idle";
+  let persistenceStatus: PersistenceStatus = "loading";
+  let storedSegmentCount = 0;
+
+  const updateCollectionControls = () => {
+    const collecting = collectorStatus === "collecting";
+    const persistenceReady = persistenceStatus === "ready";
+    fixtureSelect.disabled = collecting || !persistenceReady;
+    collectFixtureBtn.disabled =
+      collecting || !persistenceReady || options.fixtures.length === 0;
+    clearSegmentsBtn.disabled =
+      collecting || !persistenceReady || storedSegmentCount === 0;
+  };
 
   const renderStats = () => {
     renderRaf = 0;
@@ -163,9 +191,11 @@ export function createMyoArmView(
     },
 
     setCollectedSegments(segments) {
+      storedSegmentCount = segments.length;
       if (!segments.length) {
         segmentListEl.innerHTML =
-          "<li>No collected segments in this session.</li>";
+          "<li>No saved segments in the local fixture dataset.</li>";
+        updateCollectionControls();
         return;
       }
 
@@ -180,17 +210,25 @@ export function createMyoArmView(
           return item;
         }),
       );
+      updateCollectionControls();
     },
 
     setCollectionState(snapshot) {
       const collecting = snapshot.status === "collecting";
-      fixtureSelect.disabled = collecting;
-      collectFixtureBtn.disabled = collecting || options.fixtures.length === 0;
+      collectorStatus = snapshot.status;
       collectFixtureBtn.textContent = collecting
         ? `Collecting ${snapshot.sampleCount.toLocaleString()} samples…`
         : "Collect fixture";
       collectionSummaryEl.textContent = snapshot.message;
       collectionSummaryEl.dataset.status = snapshot.status;
+      updateCollectionControls();
+    },
+
+    setPersistenceState(status, message) {
+      persistenceStatus = status;
+      storageSummaryEl.textContent = message;
+      storageSummaryEl.dataset.status = status;
+      updateCollectionControls();
     },
 
     setSourceState(source, isActive, sourceName = "") {
