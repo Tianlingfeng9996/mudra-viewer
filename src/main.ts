@@ -14,6 +14,10 @@ import {
 } from "./signal/types";
 import { createSegmentCollector } from "./myoarm/collector";
 import {
+  exportMyoArmDatasetArchive,
+  importMyoArmDatasetArchive,
+} from "./myoarm/archive";
+import {
   CAPTURE_PROTOCOL_V1,
   MYOARM_DATASET_SCHEMA_VERSION,
   classifyFixtureName,
@@ -212,12 +216,32 @@ const myoArmView = createMyoArmView(myoArmEl, {
   fixtures: FIXTURES,
   onCollectFixture: (fixtureName) => { void collectFixture(fixtureName); },
   onClearSavedSegments: () => { void clearSavedFixtureSegments(); },
+  onExportDataset: () => { void exportSavedFixtureDataset(); },
+  onImportDataset: (file) => { void importSavedFixtureDataset(file); },
 });
 sampleHub.subscribe((chunk) => myoArmView.acceptSamples(chunk));
 sampleHub.subscribe((chunk) => segmentCollector.acceptSamples(chunk));
 segmentCollector.subscribe((snapshot) => myoArmView.setCollectionState(snapshot));
 myoArmView.setCollectedSegments(collectedSegments);
 void restoreFixtureDataset();
+
+function syncCurrentSessionRepetitions(
+  dataset: Awaited<ReturnType<typeof myoArmStorage.loadDataset>>,
+) {
+  fixtureRepetitions.clear();
+  const currentSession = dataset?.sessions.find(
+    (session) => session.id === fixtureSessionId,
+  );
+  for (const segment of currentSession?.segments ?? []) {
+    fixtureRepetitions.set(
+      segment.label,
+      Math.max(
+        fixtureRepetitions.get(segment.label) ?? 0,
+        segment.repetition,
+      ),
+    );
+  }
+}
 
 async function restoreFixtureDataset() {
   myoArmStorageReady = false;
@@ -230,6 +254,7 @@ async function restoreFixtureDataset() {
     const dataset = await myoArmStorage.loadDataset(fixtureDatasetId);
     const restoredSegments =
       dataset?.sessions.flatMap((session) => session.segments) ?? [];
+    syncCurrentSessionRepetitions(dataset);
     collectedSegments.splice(
       0,
       collectedSegments.length,
@@ -248,6 +273,117 @@ async function restoreFixtureDataset() {
       "error",
       `IndexedDB unavailable: ${(error as Error).message}`,
     );
+  }
+}
+
+async function exportSavedFixtureDataset() {
+  if (playing || collectingFixturePlayback || !myoArmStorageReady) {
+    segmentCollector.reportError(
+      "Wait for collection and local storage to become idle before exporting",
+    );
+    return;
+  }
+
+  myoArmStorageReady = false;
+  myoArmView.setPersistenceState("saving", "Preparing dataset archive…");
+  let datasetLoaded = false;
+  try {
+    const dataset = await myoArmStorage.loadDataset(fixtureDatasetId);
+    datasetLoaded = true;
+    const segmentCount =
+      dataset?.sessions.reduce(
+        (count, session) => count + session.segments.length,
+        0,
+      ) ?? 0;
+    if (!dataset || !segmentCount) {
+      throw new Error("There are no saved segments to export");
+    }
+
+    const archive = exportMyoArmDatasetArchive(dataset);
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[:-]/g, "")
+      .replace(/\.\d{3}Z$/, "Z");
+    const archiveBuffer = new ArrayBuffer(archive.byteLength);
+    new Uint8Array(archiveBuffer).set(archive);
+    save(
+      new Blob([archiveBuffer], { type: "application/zip" }),
+      `myoarm-fixture-dataset-${timestamp}.zip`,
+    );
+    myoArmStorageReady = true;
+    myoArmView.setPersistenceState(
+      "ready",
+      `Exported ${segmentCount.toLocaleString()} segments`,
+    );
+  } catch (error) {
+    myoArmStorageReady = datasetLoaded;
+    myoArmView.setPersistenceState(
+      datasetLoaded ? "ready-error" : "error",
+      `Dataset export failed: ${(error as Error).message}`,
+    );
+  }
+}
+
+async function importSavedFixtureDataset(file: File) {
+  if (playing || collectingFixturePlayback || !myoArmStorageReady) {
+    segmentCollector.reportError(
+      "Wait for collection and local storage to become idle before importing",
+    );
+    return;
+  }
+
+  myoArmStorageReady = false;
+  myoArmView.setPersistenceState("saving", `Validating ${file.name}…`);
+  let replacementStarted = false;
+  try {
+    const dataset = importMyoArmDatasetArchive(
+      new Uint8Array(await file.arrayBuffer()),
+    );
+    if (dataset.id !== fixtureDatasetId) {
+      throw new Error(
+        `This page accepts dataset "${fixtureDatasetId}", not "${dataset.id}"`,
+      );
+    }
+    const importedSegments = dataset.sessions.flatMap(
+      (session) => session.segments,
+    );
+    if (
+      !window.confirm(
+        `Replace the local fixture dataset with ${importedSegments.length.toLocaleString()} imported segments?`,
+      )
+    ) {
+      myoArmStorageReady = true;
+      myoArmView.setPersistenceState(
+        "ready",
+        `${collectedSegments.length.toLocaleString()} segments saved in IndexedDB`,
+      );
+      return;
+    }
+
+    myoArmView.setPersistenceState("saving", "Importing dataset…");
+    replacementStarted = true;
+    await myoArmStorage.replaceDataset(dataset);
+    collectedSegments.splice(
+      0,
+      collectedSegments.length,
+      ...importedSegments,
+    );
+    syncCurrentSessionRepetitions(dataset);
+    myoArmView.setCollectedSegments(collectedSegments);
+    myoArmStorageReady = true;
+    myoArmView.setPersistenceState(
+      "ready",
+      `Imported ${collectedSegments.length.toLocaleString()} segments into IndexedDB`,
+    );
+  } catch (error) {
+    const message = `Dataset import failed: ${(error as Error).message}`;
+    if (replacementStarted) {
+      await restoreFixtureDataset();
+      segmentCollector.reportError(message);
+    } else {
+      myoArmStorageReady = true;
+      myoArmView.setPersistenceState("ready-error", message);
+    }
   }
 }
 

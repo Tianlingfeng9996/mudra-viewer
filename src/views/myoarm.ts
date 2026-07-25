@@ -29,9 +29,16 @@ interface MyoArmViewOptions {
   fixtures: readonly string[];
   onCollectFixture(fixtureName: string): void;
   onClearSavedSegments(): void;
+  onExportDataset(): void;
+  onImportDataset(file: File): void;
 }
 
-type PersistenceStatus = "loading" | "ready" | "saving" | "error";
+type PersistenceStatus =
+  | "loading"
+  | "ready"
+  | "ready-error"
+  | "saving"
+  | "error";
 
 const sourceLabel = (source: CaptureSource | null) => {
   if (source === "bluetooth") return "Bluetooth";
@@ -84,7 +91,12 @@ export function createMyoArmView(
           <p data-role="collection-summary">Ready to collect a fixture.</p>
           <div class="myoarm-storage">
             <span data-role="storage-summary">Opening the local dataset…</span>
-            <button type="button" data-role="clear-segments" disabled>Clear saved segments</button>
+            <div class="myoarm-storage-actions">
+              <button type="button" data-role="export-dataset" disabled>Export</button>
+              <button type="button" data-role="import-dataset" disabled>Import</button>
+              <button type="button" data-role="clear-segments" disabled>Clear</button>
+            </div>
+            <input data-role="import-file" type="file" accept=".zip,application/zip" hidden>
           </div>
           <ul class="myoarm-segment-list" data-role="segment-list">
             <li>No saved segments in the local fixture dataset.</li>
@@ -118,8 +130,14 @@ export function createMyoArmView(
     root.querySelector<HTMLElement>("[data-role=collection-summary]")!;
   const storageSummaryEl =
     root.querySelector<HTMLElement>("[data-role=storage-summary]")!;
+  const exportDatasetBtn =
+    root.querySelector<HTMLButtonElement>("[data-role=export-dataset]")!;
+  const importDatasetBtn =
+    root.querySelector<HTMLButtonElement>("[data-role=import-dataset]")!;
   const clearSegmentsBtn =
     root.querySelector<HTMLButtonElement>("[data-role=clear-segments]")!;
+  const importFileInput =
+    root.querySelector<HTMLInputElement>("[data-role=import-file]")!;
   const segmentListEl =
     root.querySelector<HTMLUListElement>("[data-role=segment-list]")!;
 
@@ -134,6 +152,13 @@ export function createMyoArmView(
   collectFixtureBtn.addEventListener("click", () => {
     if (fixtureSelect.value) options.onCollectFixture(fixtureSelect.value);
   });
+  exportDatasetBtn.addEventListener("click", options.onExportDataset);
+  importDatasetBtn.addEventListener("click", () => importFileInput.click());
+  importFileInput.addEventListener("change", () => {
+    const file = importFileInput.files?.[0];
+    importFileInput.value = "";
+    if (file) options.onImportDataset(file);
+  });
   clearSegmentsBtn.addEventListener("click", options.onClearSavedSegments);
 
   let activeSource: CaptureSource | null = null;
@@ -147,10 +172,15 @@ export function createMyoArmView(
 
   const updateCollectionControls = () => {
     const collecting = collectorStatus === "collecting";
-    const persistenceReady = persistenceStatus === "ready";
+    const persistenceReady =
+      persistenceStatus === "ready" ||
+      persistenceStatus === "ready-error";
     fixtureSelect.disabled = collecting || !persistenceReady;
     collectFixtureBtn.disabled =
       collecting || !persistenceReady || options.fixtures.length === 0;
+    exportDatasetBtn.disabled =
+      collecting || !persistenceReady || storedSegmentCount === 0;
+    importDatasetBtn.disabled = collecting || !persistenceReady;
     clearSegmentsBtn.disabled =
       collecting || !persistenceReady || storedSegmentCount === 0;
   };

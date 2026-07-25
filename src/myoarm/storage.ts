@@ -21,6 +21,7 @@ export interface MyoArmStorage {
     session: MyoArmSessionMetadata,
     segment: MyoArmSegment,
   ): Promise<void>;
+  replaceDataset(dataset: MyoArmDataset): Promise<void>;
   clearDataset(datasetId: string): Promise<void>;
   close(): Promise<void>;
 }
@@ -274,6 +275,100 @@ export function createMyoArmStorage(
       } satisfies StoredSegment);
 
       await done;
+    },
+
+    async replaceDataset(dataset) {
+      const sessionIds = new Set<string>();
+      const segmentIds = new Set<string>();
+      for (const session of dataset.sessions) {
+        if (session.datasetId !== dataset.id) {
+          throw new Error(
+            `Session "${session.id}" does not belong to dataset "${dataset.id}"`,
+          );
+        }
+        if (sessionIds.has(session.id)) {
+          throw new Error(`Duplicate session identifier "${session.id}"`);
+        }
+        sessionIds.add(session.id);
+        for (const segment of session.segments) {
+          if (segment.sessionId !== session.id) {
+            throw new Error(
+              `Segment "${segment.id}" does not belong to session "${session.id}"`,
+            );
+          }
+          if (segmentIds.has(segment.id)) {
+            throw new Error(`Duplicate segment identifier "${segment.id}"`);
+          }
+          segmentIds.add(segment.id);
+        }
+      }
+
+      const database = await openDatabase();
+      const transaction = database.transaction(
+        [STORES.datasets, STORES.sessions, STORES.segments],
+        "readwrite",
+      );
+      const done = transactionDone(transaction);
+      const sessionsStore = transaction.objectStore(STORES.sessions);
+      const segmentsStore = transaction.objectStore(STORES.segments);
+      const sessionKeysRequest = sessionsStore
+        .index(INDEXES.sessionDatasetId)
+        .getAllKeys(IDBKeyRange.only(dataset.id));
+      const segmentKeysRequest = segmentsStore
+        .index(INDEXES.segmentDatasetId)
+        .getAllKeys(IDBKeyRange.only(dataset.id));
+      let sessionKeys: IDBValidKey[] | null = null;
+      let segmentKeys: IDBValidKey[] | null = null;
+      let replacementWritten = false;
+
+      const writeReplacement = () => {
+        if (replacementWritten || !sessionKeys || !segmentKeys) return;
+        replacementWritten = true;
+
+        for (const key of sessionKeys) sessionsStore.delete(key);
+        for (const key of segmentKeys) segmentsStore.delete(key);
+
+        const { sessions, ...datasetMetadata } = dataset;
+        transaction.objectStore(STORES.datasets).put({
+          ...datasetMetadata,
+          labelSet: [...datasetMetadata.labelSet],
+        });
+        for (const session of sessions) {
+          const { segments, ...sessionMetadata } = session;
+          sessionsStore.put({
+            ...sessionMetadata,
+            channels: [...sessionMetadata.channels],
+          });
+          for (const segment of segments) {
+            segmentsStore.put({
+              ...cloneSegment(segment),
+              datasetId: dataset.id,
+            } satisfies StoredSegment);
+          }
+        }
+      };
+
+      sessionKeysRequest.addEventListener(
+        "success",
+        () => {
+          sessionKeys = sessionKeysRequest.result;
+          writeReplacement();
+        },
+        { once: true },
+      );
+      segmentKeysRequest.addEventListener(
+        "success",
+        () => {
+          segmentKeys = segmentKeysRequest.result;
+          writeReplacement();
+        },
+        { once: true },
+      );
+
+      await done;
+      if (!replacementWritten) {
+        throw new Error("Dataset replacement did not write any records");
+      }
     },
 
     async clearDataset(datasetId) {

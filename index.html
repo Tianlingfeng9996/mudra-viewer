@@ -178,7 +178,11 @@
         justify-content: space-between; gap: 10px; color: #6b6858;
         font-size: 12px;
       }
-      .myoarm-storage [data-status="error"] { color: #d92d20; }
+      .myoarm-storage [data-status="error"],
+      .myoarm-storage [data-status="ready-error"] { color: #d92d20; }
+      .myoarm-storage-actions {
+        display: inline-flex; flex: 0 0 auto; gap: 5px;
+      }
       .myoarm-storage button {
         flex: 0 0 auto; padding: 5px 9px; border: 1px solid #c9c5b7;
         background: #fff; color: #6b6858; font-size: 11px;

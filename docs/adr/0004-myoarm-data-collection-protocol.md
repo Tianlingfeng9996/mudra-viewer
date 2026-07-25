@@ -59,9 +59,9 @@ Decoded values are retained as sample-major, interleaved `Int32Array` data at
 duration, sample count, quality flags, session, source, arm side, and
 pseudonymous participant identifier.
 
-The schema version starts at `1`. Large sample arrays will be stored in
-IndexedDB; `localStorage` is reserved for small preferences. Dataset ZIP export
-will include versioned metadata and binary sample data.
+The schema version starts at `1`. Large sample arrays are stored in IndexedDB;
+`localStorage` is reserved for small preferences. Dataset ZIP export includes a
+versioned JSON manifest and one little-endian Int32 binary payload per segment.
 
 ### Hardware-independent development
 
@@ -104,5 +104,8 @@ metrics.
 - IndexedDB stores dataset, session, and segment records separately. A completed
   fixture segment is committed with its parent metadata in one transaction and
   restored when the page reloads.
-- The next implementation step is dataset export/import, followed by shared
-  preprocessing for offline training and live inference.
+- Dataset export and import use a validated, store-only ZIP archive. Import
+  replaces the matching local fixture dataset atomically after user
+  confirmation.
+- The next implementation step is shared preprocessing for offline training
+  and live inference.
