@@ -4,6 +4,14 @@ import { drawTime } from "./views/time";
 import { createSpectrumView, SPEC_WINDOW, SPEC_BINS } from "./views/spectrum";
 import { createManifoldView } from "./views/manifold";
 import { createSpikesView } from "./views/spikes";
+import { createMyoArmView } from "./views/myoarm";
+import { createSampleHub } from "./signal/sample-hub";
+import {
+  EMG_CHANNELS,
+  EMG_SAMPLE_RATE_HZ,
+  type CaptureSource,
+  type SampleChunk,
+} from "./signal/types";
 import { zip } from "./zip";
 
 // --- Mudra Link BLE constants (see mudraka docs/MUDRA_LINK_SIGNAL_SPEC.md) ---
@@ -15,9 +23,9 @@ const DISABLE_SNC = Uint8Array.of(0x06, 0x00, 0x00); // stop SNC stream (return 
 const uuid = (n: number) =>
   `0000${(n & 0xffff).toString(16).padStart(4, "0")}-0000-1000-8000-00805f9b34fb`;
 
-const CH = 3;
-const RATE = 834;
-const LABELS = ["ulnar", "median", "radial"];
+const CH = EMG_CHANNELS.length;
+const RATE = EMG_SAMPLE_RATE_HZ;
+const LABELS = EMG_CHANNELS;
 const WINDOW = Math.ceil(3 * RATE); // ~3 s of samples per channel
 const COLORS = ["#2563eb", "#0f9d58", "#c026d3"];
 
@@ -108,6 +116,25 @@ const rings = Array.from({ length: CH }, () => new Float32Array(WINDOW));
 let writeIdx = 0; // next write position; total count is unbounded but we only keep WINDOW
 // Decoded samples land here; the free-running display clock (see advanceRing) drains them at RATE — whatever source is active (live BLE / recorded playback) just fills it.
 const sampleQueue: number[][] = [];
+const sampleHub = createSampleHub<SampleChunk>();
+sampleHub.subscribe((chunk) => {
+  const channelCount = chunk.channels.length;
+  if (channelCount !== CH || chunk.samples.length % channelCount !== 0) {
+    console.warn("Ignoring malformed decoded sample chunk", chunk);
+    return;
+  }
+  for (let offset = 0; offset < chunk.samples.length; offset += channelCount) {
+    const sample = new Array<number>(channelCount);
+    for (let channel = 0; channel < channelCount; channel++) {
+      sample[channel] = chunk.samples[offset + channel];
+    }
+    sampleQueue.push(sample);
+  }
+  // Bound display latency independently of collectors and inference consumers.
+  if (sampleQueue.length > WINDOW) {
+    sampleQueue.splice(0, sampleQueue.length - WINDOW);
+  }
+});
 const ZEROS = new Array(CH).fill(0); // fed to the spike processor when the queue is empty (idle scroll)
 const canvases: HTMLCanvasElement[] = [];
 for (let c = 0; c < CH; c++) {
@@ -139,6 +166,8 @@ const viewFromPath = (pathname: string): View => {
 const spectrumView = createSpectrumView(specCanvas, COLORS);
 const manifoldView = createManifoldView(manifoldCanvas);
 const spikesView = createSpikesView(spikesCanvas);
+const myoArmView = createMyoArmView(myoArmEl, { fixtureCount: FIXTURES.length });
+sampleHub.subscribe((chunk) => myoArmView.acceptSamples(chunk));
 
 function moveTabIndicator() {
   const active = document.querySelector<HTMLButtonElement>("#tabs button.active");
@@ -286,24 +315,31 @@ let cmdChar: BluetoothRemoteGATTCharacteristic | null = null;
 
 const MAX_PULL = 256;
 
-// Shared decode path: raw SNC frame bytes in, decoded samples pushed to display — both the live BLE feed and the recorded-session playback go through here.
-function feedBytes(bytes: Uint8Array, tSec: number) {
+// Shared decode path: raw SNC frame bytes in, decoded chunks published once to every consumer.
+function feedBytes(bytes: Uint8Array, tSec: number, source: CaptureSource) {
   stream!.feed(bytes, tSec);
   const base = dstPtr >> 2;
   for (;;) {
     const r = stream!.pullInto(cursor, dstPtr, MAX_PULL);
-    for (let i = 0; i < r.written; i++) {
-      sampleQueue.push([
-        M!.HEAP32[base + 0 * MAX_PULL + i],
-        M!.HEAP32[base + 1 * MAX_PULL + i],
-        M!.HEAP32[base + 2 * MAX_PULL + i],
-      ]);
+    if (r.written) {
+      const samples = new Int32Array(r.written * CH);
+      for (let i = 0; i < r.written; i++) {
+        for (let channel = 0; channel < CH; channel++) {
+          samples[i * CH + channel] =
+            M!.HEAP32[base + channel * MAX_PULL + i];
+        }
+      }
+      sampleHub.publish({
+        source,
+        receivedAtSec: tSec,
+        sampleRateHz: RATE,
+        channels: EMG_CHANNELS,
+        samples,
+      });
     }
     cursor = r.next_cursor;
     if (r.written < MAX_PULL) break;
   }
-  // Bound latency: a burst can't back up more than one screen behind the clock.
-  if (sampleQueue.length > WINDOW) sampleQueue.splice(0, sampleQueue.length - WINDOW);
 }
 
 async function setupEngine() {
@@ -360,7 +396,7 @@ function onNotification(e: Event) {
   const dv = (e.target as BluetoothRemoteGATTCharacteristic).value!;
   const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
   if (recording) recordFrame(bytes);
-  feedBytes(bytes, performance.now() / 1000);
+  feedBytes(bytes, performance.now() / 1000, "bluetooth");
 }
 
 function cleanup() {
@@ -372,6 +408,7 @@ function cleanup() {
   if (M && specPtr) { M._free(specPtr); specPtr = 0; }
   cursor = 0;
   sampleQueue.length = 0; // stop feeding; the clock scrolls zeros in on its own
+  myoArmView.setSourceState(null, false);
   setBtn(connectBtn, ICON_BLUETOOTH, "Connect");
   connectBtn.classList.remove("connected");
   connectBtn.disabled = false;
@@ -441,6 +478,11 @@ async function connect() {
     connectBtn.classList.add("connected");
     connectBtn.disabled = false;
     recordBtn.disabled = false;
+    myoArmView.setSourceState(
+      "bluetooth",
+      true,
+      device.name ?? "Mudra Link",
+    );
   } catch (err) {
     setStatus(`Connection failed: ${(err as Error).message}`, "error");
     device?.gatt?.disconnect();
@@ -518,6 +560,7 @@ async function play(name: string) {
   playBtn.classList.add("connected");
   playBtn.disabled = false;
   setStatus("Playing sample", "ok");
+  myoArmView.setSourceState("fixture", true, name);
 
   const t0 = frames[0].t_mono_ns;
   const start = performance.now();
@@ -527,7 +570,11 @@ async function play(name: string) {
     const elapsed = performance.now() - start;
     while (i < frames.length && (frames[i].t_mono_ns - t0) / 1e6 <= elapsed) {
       const f = frames[i++];
-      feedBytes(bin.subarray(f.offset, f.offset + f.len), performance.now() / 1000);
+      feedBytes(
+        bin.subarray(f.offset, f.offset + f.len),
+        performance.now() / 1000,
+        "fixture",
+      );
     }
     if (i < frames.length) playRaf = requestAnimationFrame(tick);
     else { // played through once — stop feeding; the clock scrolls the tail out

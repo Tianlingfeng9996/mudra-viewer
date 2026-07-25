@@ -130,8 +130,25 @@
         min-height: 150px; padding: 20px; border: 1px dashed #c9c5b7;
         border-radius: 10px; background: #faf9f5;
       }
+      .myoarm-card.ready { border-style: solid; border-color: #b9d7c5; }
+      .myoarm-state {
+        display: inline-block; margin-bottom: 10px; padding: 2px 8px; border-radius: 999px;
+        background: #e5f2e9; color: #287249; font-size: 11px; font-weight: 700;
+        letter-spacing: 0.02em; text-transform: uppercase;
+      }
+      .myoarm-state.live { background: #dce9f8; color: #2563eb; }
       .myoarm-card h3 { margin: 0 0 8px; font-size: 16px; }
       .myoarm-card p { margin: 0; color: #8a877a; }
+      .myoarm-card ul { margin: 10px 0 0; padding-left: 18px; color: #6b6858; }
+      .myoarm-source-stats {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px; margin: 14px 0 0;
+      }
+      .myoarm-source-stats div {
+        padding: 8px 10px; border-radius: 6px; background: #f2f0e8;
+      }
+      .myoarm-source-stats dt { color: #8a877a; font-size: 11px; }
+      .myoarm-source-stats dd { margin: 2px 0 0; color: #3d3d3a; font-weight: 600; }
       .myoarm-card:last-child { grid-column: 1 / -1; min-height: 220px; }
       @media (max-width: 700px) {
         #myoarm { padding: 20px 14px 76px; }
@@ -243,34 +260,7 @@
         <button id="spikes-dialog-close">Close</button>
       </dialog>
     </div>
-    <section id="myoarm" hidden aria-labelledby="myoarm-title">
-      <div class="myoarm-header">
-        <h2 id="myoarm-title">MyoArm workspace</h2>
-        <p>Hardware integration will be added later. These areas are placeholders for the MyoArm workflow.</p>
-      </div>
-      <div class="myoarm-grid">
-        <article class="myoarm-card">
-          <h3>EMG streaming</h3>
-          <p>Live EMG signal controls and preview will appear here.</p>
-        </article>
-        <article class="myoarm-card">
-          <h3>Recording</h3>
-          <p>Session recording controls and metadata will appear here.</p>
-        </article>
-        <article class="myoarm-card">
-          <h3>Model training</h3>
-          <p>Dataset selection and training progress will appear here.</p>
-        </article>
-        <article class="myoarm-card">
-          <h3>Inference</h3>
-          <p>Real-time prediction output will appear here.</p>
-        </article>
-        <article class="myoarm-card">
-          <h3>Hand visualization</h3>
-          <p>The inferred hand pose visualization will appear here.</p>
-        </article>
-      </div>
-    </section>
+    <section id="myoarm" hidden></section>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
