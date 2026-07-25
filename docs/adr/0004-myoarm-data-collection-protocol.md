@@ -112,6 +112,33 @@ Every prepared window carries its parent segment as a grouping identifier.
 Future dataset splitting must assign whole segment or session groups to one
 partition before any ANN or TF2AngleNet performance is reported.
 
+### Grouped dataset split v1
+
+`myoarm-grouped-split-v1` creates deterministic 60% train, 20% validation,
+and 20% test partitions. Ratios are applied to independent groups rather than
+individual windows, so window totals may differ slightly when recordings have
+different lengths.
+
+Two explicit grouping modes are available:
+
+- `segment`: all overlapping windows from one repetition stay together.
+  Segment groups are stratified separately for each observed gesture label.
+  With ten repetitions per label, each label contributes six segment groups
+  to train, two to validation, and two to test.
+- `session`: every segment and window recorded in one session stays together.
+  Whole sessions are deterministically ordered and allocated, providing the
+  stronger check against session-specific placement and recording conditions.
+
+The assignment uses a fixed seed and stable group identifiers, so the same
+dataset and configuration produce the same split. A split is marked ready only
+when train, validation, and test are non-empty and every observed label is
+represented in all three partitions. Missing coverage is reported instead of
+moving windows or segments across group boundaries.
+
+One segment per label, or one session containing all labels, is intentionally
+not enough for evaluation. Such data remains useful for checking execution of
+the preprocessing and model-training code.
+
 ## Consequences
 
 - Data collection, storage, and training UI can be implemented without waiting
@@ -133,6 +160,8 @@ partition before any ANN or TF2AngleNet performance is reported.
   confirmation.
 - Shared preprocessing now produces deterministic fixed-size inputs for both
   the baseline ANN and TF2AngleNet integration.
-- The next implementation step is a grouped dataset split and a minimal
-  baseline ANN training loop; fixture runs can verify execution but not
-  performance.
+- Grouped splitting now prevents overlapping-window leakage and reports label
+  coverage for both repetition-level and session-level evaluation.
+- The next implementation step is a minimal baseline ANN training loop that
+  consumes only the train partition, tunes against validation, and reports the
+  final held-out test result once.

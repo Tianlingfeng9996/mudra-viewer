@@ -11,8 +11,16 @@ import type { CollectorSnapshot } from "../myoarm/collector";
 import type { MyoArmSegment } from "../myoarm/types";
 import {
   prepareMyoArmDataset,
+  type PreparedMyoArmDataset,
   type PreprocessingIssueCode,
 } from "../myoarm/preprocessing";
+import {
+  DATASET_SPLIT_CONFIG_V1,
+  splitPreparedDataset,
+  type DatasetGroupBy,
+  type DatasetPartition,
+  type DatasetPartitionName,
+} from "../myoarm/split";
 import {
   calculateChannelStatistics,
   createMyoArmSegmentPlot,
@@ -158,6 +166,42 @@ export function createMyoArmView(
         <p class="myoarm-preprocessing-warning" data-role="preprocessing-warning">
           Collect or import accepted segments to prepare model inputs.
         </p>
+        <div class="myoarm-split-controls">
+          <label>
+            Group split by
+            <select data-role="split-grouping" aria-label="Dataset split grouping">
+              <option value="segment">Segment / repetition</option>
+              <option value="session">Recording session</option>
+            </select>
+          </label>
+          <span class="myoarm-split-state" data-role="split-state">Not ready</span>
+        </div>
+        <p class="myoarm-split-rule">
+          Deterministic 60% train / 20% validation / 20% test allocation.
+        </p>
+        <div class="myoarm-split-grid">
+          <section data-role="split-train">
+            <h4>Train</h4>
+            <strong data-role="split-windows">0 windows</strong>
+            <span data-role="split-groups">0 groups</span>
+            <div data-role="split-labels"></div>
+          </section>
+          <section data-role="split-validation">
+            <h4>Validation</h4>
+            <strong data-role="split-windows">0 windows</strong>
+            <span data-role="split-groups">0 groups</span>
+            <div data-role="split-labels"></div>
+          </section>
+          <section data-role="split-test">
+            <h4>Test</h4>
+            <strong data-role="split-windows">0 windows</strong>
+            <span data-role="split-groups">0 groups</span>
+            <div data-role="split-labels"></div>
+          </section>
+        </div>
+        <p class="myoarm-split-warning" data-role="split-warning">
+          At least three independent groups per observed label are required.
+        </p>
       </article>
       <article class="myoarm-card">
         <h3>Inference</h3>
@@ -235,6 +279,43 @@ export function createMyoArmView(
     root.querySelector<HTMLElement>("[data-role=label-distribution]")!;
   const preprocessingWarningEl =
     root.querySelector<HTMLElement>("[data-role=preprocessing-warning]")!;
+  const splitGroupingSelect =
+    root.querySelector<HTMLSelectElement>("[data-role=split-grouping]")!;
+  const splitStateEl =
+    root.querySelector<HTMLElement>("[data-role=split-state]")!;
+  const splitWarningEl =
+    root.querySelector<HTMLElement>("[data-role=split-warning]")!;
+
+  const splitPartitionElements = new Map<
+    DatasetPartitionName,
+    {
+      root: HTMLElement;
+      windows: HTMLElement;
+      groups: HTMLElement;
+      labels: HTMLElement;
+    }
+  >();
+  for (const partitionName of [
+    "train",
+    "validation",
+    "test",
+  ] as const) {
+    const partitionRoot = root.querySelector<HTMLElement>(
+      `[data-role=split-${partitionName}]`,
+    )!;
+    splitPartitionElements.set(partitionName, {
+      root: partitionRoot,
+      windows: partitionRoot.querySelector<HTMLElement>(
+        "[data-role=split-windows]",
+      )!,
+      groups: partitionRoot.querySelector<HTMLElement>(
+        "[data-role=split-groups]",
+      )!,
+      labels: partitionRoot.querySelector<HTMLElement>(
+        "[data-role=split-labels]",
+      )!,
+    });
+  }
 
   fixtureSelect.replaceChildren(
     ...options.fixtures.map((fixture) => {
@@ -265,6 +346,7 @@ export function createMyoArmView(
   let persistenceStatus: PersistenceStatus = "loading";
   let storedSegmentCount = 0;
   let selectedSegmentId: string | null = null;
+  let preparedDataset: PreparedMyoArmDataset | null = null;
 
   const preprocessingIssueLabel: Record<PreprocessingIssueCode, string> = {
     "quality-rejected": "quality rejected",
@@ -274,10 +356,89 @@ export function createMyoArmView(
     "too-short": "too short",
   };
 
+  const renderPartition = (
+    partition: DatasetPartition,
+    groupBy: DatasetGroupBy,
+  ) => {
+    const elements = splitPartitionElements.get(partition.name)!;
+    elements.windows.textContent =
+      `${partition.summary.windowCount.toLocaleString()} windows`;
+    elements.groups.textContent =
+      `${partition.summary.groupCount.toLocaleString()} ${groupBy} group(s) · ` +
+      `${partition.summary.segmentCount.toLocaleString()} segment(s)`;
+    const labelCounts = Object.entries(
+      partition.summary.windowsByLabel,
+    ).filter(([, count]) => count > 0);
+    elements.labels.replaceChildren(
+      ...(labelCounts.length
+        ? labelCounts.map(([label, count]) => {
+            const item = document.createElement("span");
+            item.textContent = `${label}: ${count.toLocaleString()}`;
+            return item;
+          })
+        : [Object.assign(document.createElement("span"), {
+            textContent: "No windows",
+          })]),
+    );
+    elements.root.classList.toggle(
+      "empty",
+      partition.summary.windowCount === 0,
+    );
+  };
+
+  const renderDatasetSplit = () => {
+    const groupBy = splitGroupingSelect.value as DatasetGroupBy;
+    if (!preparedDataset) return;
+    const split = splitPreparedDataset(preparedDataset, {
+      ...DATASET_SPLIT_CONFIG_V1,
+      groupBy,
+    });
+    renderPartition(split.partitions.train, groupBy);
+    renderPartition(split.partitions.validation, groupBy);
+    renderPartition(split.partitions.test, groupBy);
+
+    splitStateEl.textContent = split.ready ? "Ready" : "Not ready";
+    splitStateEl.classList.toggle("ready", split.ready);
+    if (!split.observedLabels.length) {
+      splitWarningEl.textContent =
+        "Collect or import accepted segments before creating a split.";
+      return;
+    }
+    if (split.ready) {
+      splitWarningEl.textContent =
+        `Ready: ${split.totalGroupCount.toLocaleString()} independent ${groupBy} groups, ` +
+        "with every observed label represented in train, validation, and test.";
+      return;
+    }
+
+    const missingCoverage = ([
+      "train",
+      "validation",
+      "test",
+    ] as const)
+      .map((partitionName) => {
+        const missing =
+          split.partitions[partitionName].summary.missingLabels;
+        return missing.length
+          ? `${partitionName}: ${missing.join(", ")}`
+          : null;
+      })
+      .filter((message): message is string => Boolean(message));
+    const requirement =
+      groupBy === "segment"
+        ? "Collect at least three independent repetitions for every observed label; the protocol target is ten."
+        : "Collect at least three independent sessions containing every observed label.";
+    splitWarningEl.textContent =
+      `Not ready for evaluation. Missing label coverage — ${missingCoverage.join("; ")}. ${requirement}`;
+  };
+
+  splitGroupingSelect.addEventListener("change", renderDatasetSplit);
+
   const renderPreprocessingSummary = (
     segments: readonly MyoArmSegment[],
   ) => {
     const prepared = prepareMyoArmDataset(segments);
+    preparedDataset = prepared;
     const { config, summary } = prepared;
     preprocessingStateEl.textContent = summary.windowCount
       ? "Windows ready"
@@ -330,6 +491,7 @@ export function createMyoArmView(
       preprocessingWarningEl.textContent =
         "Pipeline check only: overlapping windows remain grouped by segment. Fixtures must not be used to claim model accuracy.";
     }
+    renderDatasetSplit();
   };
 
   const renderSegmentPreview = (segment: MyoArmSegment | null) => {
