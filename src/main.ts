@@ -12,6 +12,9 @@ import {
   type CaptureSource,
   type SampleChunk,
 } from "./signal/types";
+import { createSegmentCollector } from "./myoarm/collector";
+import { CAPTURE_PROTOCOL_V1, classifyFixtureName } from "./myoarm/protocol";
+import type { GestureLabel, MyoArmSegment } from "./myoarm/types";
 import { zip } from "./zip";
 
 // --- Mudra Link BLE constants (see mudraka docs/MUDRA_LINK_SIGNAL_SPEC.md) ---
@@ -117,6 +120,11 @@ let writeIdx = 0; // next write position; total count is unbounded but we only k
 // Decoded samples land here; the free-running display clock (see advanceRing) drains them at RATE — whatever source is active (live BLE / recorded playback) just fills it.
 const sampleQueue: number[][] = [];
 const sampleHub = createSampleHub<SampleChunk>();
+const segmentCollector = createSegmentCollector();
+const collectedSegments: MyoArmSegment[] = [];
+const fixtureSessionId = crypto.randomUUID();
+const fixtureSessionStartedAt = performance.now();
+const fixtureRepetitions = new Map<GestureLabel, number>();
 sampleHub.subscribe((chunk) => {
   const channelCount = chunk.channels.length;
   if (channelCount !== CH || chunk.samples.length % channelCount !== 0) {
@@ -166,8 +174,14 @@ const viewFromPath = (pathname: string): View => {
 const spectrumView = createSpectrumView(specCanvas, COLORS);
 const manifoldView = createManifoldView(manifoldCanvas);
 const spikesView = createSpikesView(spikesCanvas);
-const myoArmView = createMyoArmView(myoArmEl, { fixtureCount: FIXTURES.length });
+const myoArmView = createMyoArmView(myoArmEl, {
+  fixtures: FIXTURES,
+  onCollectFixture: (fixtureName) => { void collectFixture(fixtureName); },
+});
 sampleHub.subscribe((chunk) => myoArmView.acceptSamples(chunk));
+sampleHub.subscribe((chunk) => segmentCollector.acceptSamples(chunk));
+segmentCollector.subscribe((snapshot) => myoArmView.setCollectionState(snapshot));
+myoArmView.setCollectedSegments(collectedSegments);
 
 function moveTabIndicator() {
   const active = document.querySelector<HTMLButtonElement>("#tabs button.active");
@@ -528,10 +542,11 @@ if (import.meta.hot) {
 // Replays a captured session's raw SNC frames through the same decode path as the live BLE feed, at the frames' recorded cadence — plays through once, then stops.
 let playing = false;
 let playRaf = 0;
+let collectingFixturePlayback = false;
 
 type Frame = { offset: number; len: number; uuid: string; dir: string; t_mono_ns: number };
 
-async function play(name: string) {
+async function play(name: string): Promise<boolean> {
   playBtn.disabled = true;
   connectBtn.disabled = true;
   setStatus("Loading sample…", "busy");
@@ -547,14 +562,23 @@ async function play(name: string) {
     bin = new Uint8Array(buf);
     const sncUuid = uuid(CHAR_SNC);
     frames = (index.frames as Frame[]).filter((f) => f.uuid === sncUuid && f.dir === "rx");
+    if (!frames.length) {
+      throw new Error("The fixture contains no SNC receive frames");
+    }
   } catch (err) {
     setStatus(`Failed to load sample: ${(err as Error).message}`, "error");
     connectBtn.disabled = false;
     playBtn.disabled = false;
-    return;
+    return false;
   }
 
-  await setupEngine();
+  try {
+    await setupEngine();
+  } catch (err) {
+    setStatus(`Failed to start sample: ${(err as Error).message}`, "error");
+    cleanup();
+    return false;
+  }
   playing = true;
   setBtn(playBtn, ICON_SQUARE, "Stop");
   playBtn.classList.add("connected");
@@ -579,18 +603,80 @@ async function play(name: string) {
     if (i < frames.length) playRaf = requestAnimationFrame(tick);
     else { // played through once — stop feeding; the clock scrolls the tail out
       playing = false;
+      if (collectingFixturePlayback) {
+        const segment = segmentCollector.complete();
+        collectingFixturePlayback = false;
+        if (segment) {
+          collectedSegments.push(segment);
+          myoArmView.setCollectedSegments(collectedSegments);
+        }
+      }
       cleanup();
       setStatus("Sample finished", "idle");
     }
   };
   playRaf = requestAnimationFrame(tick);
+  return true;
 }
 
 function stopPlay() {
   playing = false;
   cancelAnimationFrame(playRaf);
+  if (collectingFixturePlayback) {
+    collectingFixturePlayback = false;
+    segmentCollector.cancel("Fixture collection stopped before completion");
+  }
   setStatus("Not connected", "idle");
   cleanup();
+}
+
+async function collectFixture(name: string) {
+  if (playing || device?.gatt?.connected) {
+    segmentCollector.reportError(
+      "Stop the current playback or disconnect Bluetooth before collecting a fixture",
+    );
+    return;
+  }
+
+  const fixture = classifyFixtureName(name);
+  if (!fixture) {
+    segmentCollector.reportError(
+      `Fixture "${name}" does not map to a MyoArm gesture`,
+    );
+    return;
+  }
+
+  const repetition = (fixtureRepetitions.get(fixture.label) ?? 0) + 1;
+  segmentCollector.start({
+    segmentId: crypto.randomUUID(),
+    sessionId: fixtureSessionId,
+    source: "fixture",
+    label: fixture.label,
+    effort: fixture.effort,
+    repetition,
+    startOffsetMs: performance.now() - fixtureSessionStartedAt,
+    sampleRateHz: RATE,
+    channels: EMG_CHANNELS,
+    minimumDurationMs: CAPTURE_PROTOCOL_V1.activeMs,
+  });
+  collectingFixturePlayback = true;
+
+  let started = false;
+  try {
+    started = await play(name);
+  } catch (err) {
+    segmentCollector.reportError(
+      `Fixture collection failed: ${(err as Error).message}`,
+    );
+  }
+  if (!started) {
+    collectingFixturePlayback = false;
+    if (segmentCollector.snapshot.status === "collecting") {
+      segmentCollector.cancel("Fixture collection could not start");
+    }
+    return;
+  }
+  fixtureRepetitions.set(fixture.label, repetition);
 }
 
 // Playing → button stops. Idle → button toggles the fixture menu.
@@ -601,7 +687,7 @@ playBtn.addEventListener("click", (e) => {
 });
 playMenu.addEventListener("click", (e) => {
   const f = (e.target as HTMLElement).dataset.fixture;
-  if (f) { playMenu.hidden = true; play(f); }
+  if (f) { playMenu.hidden = true; void play(f); }
 });
 // Click anywhere else closes the menu.
 document.addEventListener("click", () => (playMenu.hidden = true));

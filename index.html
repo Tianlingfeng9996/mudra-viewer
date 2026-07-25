@@ -149,6 +149,35 @@
       }
       .myoarm-source-stats dt { color: #8a877a; font-size: 11px; }
       .myoarm-source-stats dd { margin: 2px 0 0; color: #3d3d3a; font-weight: 600; }
+      .myoarm-collector {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px 10px; margin-top: 16px; padding-top: 14px;
+        border-top: 1px solid #e8e6dd;
+      }
+      .myoarm-collector label {
+        display: grid; gap: 4px; color: #6b6858; font-size: 12px;
+      }
+      .myoarm-collector select {
+        width: 100%; min-width: 0; padding: 8px 10px;
+        border: 1px solid #c9c5b7; border-radius: 6px;
+        background: #fff; color: #3d3d3a; font: inherit;
+      }
+      .myoarm-collector button {
+        align-self: end; padding: 8px 14px; border: 0; border-radius: 6px;
+        background: #6b6858; color: #fff; cursor: pointer; font-weight: 600;
+      }
+      .myoarm-collector button:disabled {
+        background: #e0ddd0; color: #a5a294; cursor: not-allowed;
+      }
+      .myoarm-collector [data-role="collection-summary"] {
+        grid-column: 1 / -1; color: #6b6858;
+      }
+      .myoarm-collector [data-status="error"] { color: #d92d20; }
+      .myoarm-card .myoarm-segment-list {
+        grid-column: 1 / -1; max-height: 150px; overflow: auto;
+        margin: 0; padding: 8px 8px 8px 26px; border-radius: 6px;
+        background: #f2f0e8; font-size: 12px;
+      }
       .myoarm-card:last-child { grid-column: 1 / -1; min-height: 220px; }
       @media (max-width: 700px) {
         #myoarm { padding: 20px 14px 76px; }

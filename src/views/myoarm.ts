@@ -7,9 +7,13 @@ import {
   type CaptureSource,
   type SampleChunk,
 } from "../signal/types";
+import type { CollectorSnapshot } from "../myoarm/collector";
+import type { MyoArmSegment } from "../myoarm/types";
 
 export interface MyoArmView {
   acceptSamples(chunk: SampleChunk): void;
+  setCollectedSegments(segments: readonly MyoArmSegment[]): void;
+  setCollectionState(snapshot: CollectorSnapshot): void;
   setSourceState(
     source: CaptureSource | null,
     active: boolean,
@@ -18,7 +22,8 @@ export interface MyoArmView {
 }
 
 interface MyoArmViewOptions {
-  fixtureCount: number;
+  fixtures: readonly string[];
+  onCollectFixture(fixtureName: string): void;
 }
 
 const sourceLabel = (source: CaptureSource | null) => {
@@ -47,7 +52,7 @@ export function createMyoArmView(
         <h3>Data source</h3>
         <p data-role="source-summary">Play a built-in fixture or connect a Mudra Link to verify the shared decoded-sample pipeline.</p>
         <dl class="myoarm-source-stats">
-          <div><dt>Available fixtures</dt><dd>${options.fixtureCount}</dd></div>
+          <div><dt>Available fixtures</dt><dd>${options.fixtures.length}</dd></div>
           <div><dt>Current source</dt><dd data-role="source-name">No source</dd></div>
           <div><dt>Decoded samples</dt><dd data-role="sample-count">0</dd></div>
           <div><dt>Sample rate</dt><dd>${EMG_SAMPLE_RATE_HZ} Hz</dd></div>
@@ -63,6 +68,17 @@ export function createMyoArmView(
           <li>${protocol.recoveryMs / 1_000} s recovery</li>
           <li>${protocol.repetitionsPerLabel} repetitions per label</li>
         </ul>
+        <div class="myoarm-collector">
+          <label>
+            Fixture
+            <select data-role="fixture-select" aria-label="Fixture to collect"></select>
+          </label>
+          <button type="button" data-role="collect-fixture">Collect fixture</button>
+          <p data-role="collection-summary">Ready to collect a fixture. Results are kept in memory until IndexedDB is added.</p>
+          <ul class="myoarm-segment-list" data-role="segment-list">
+            <li>No collected segments in this session.</li>
+          </ul>
+        </div>
       </article>
       <article class="myoarm-card">
         <h3>Model training</h3>
@@ -83,6 +99,27 @@ export function createMyoArmView(
   const summaryEl = root.querySelector<HTMLElement>("[data-role=source-summary]")!;
   const sourceNameEl = root.querySelector<HTMLElement>("[data-role=source-name]")!;
   const sampleCountEl = root.querySelector<HTMLElement>("[data-role=sample-count]")!;
+  const fixtureSelect =
+    root.querySelector<HTMLSelectElement>("[data-role=fixture-select]")!;
+  const collectFixtureBtn =
+    root.querySelector<HTMLButtonElement>("[data-role=collect-fixture]")!;
+  const collectionSummaryEl =
+    root.querySelector<HTMLElement>("[data-role=collection-summary]")!;
+  const segmentListEl =
+    root.querySelector<HTMLUListElement>("[data-role=segment-list]")!;
+
+  fixtureSelect.replaceChildren(
+    ...options.fixtures.map((fixture) => {
+      const option = document.createElement("option");
+      option.value = fixture;
+      option.textContent = fixture;
+      return option;
+    }),
+  );
+  collectFixtureBtn.disabled = options.fixtures.length === 0;
+  collectFixtureBtn.addEventListener("click", () => {
+    if (fixtureSelect.value) options.onCollectFixture(fixtureSelect.value);
+  });
 
   let activeSource: CaptureSource | null = null;
   let activeSourceName = "";
@@ -123,6 +160,37 @@ export function createMyoArmView(
       activeSource = chunk.source;
       sampleCount += Math.floor(chunk.samples.length / channelCount);
       scheduleRender();
+    },
+
+    setCollectedSegments(segments) {
+      if (!segments.length) {
+        segmentListEl.innerHTML =
+          "<li>No collected segments in this session.</li>";
+        return;
+      }
+
+      segmentListEl.replaceChildren(
+        ...segments.map((collected) => {
+          const item = document.createElement("li");
+          const duration = (collected.durationMs / 1_000).toFixed(2);
+          const quality = collected.quality.accepted ? "accepted" : "review";
+          item.textContent =
+            `${collected.label} · ${collected.effort} · repetition ${collected.repetition} · ` +
+            `${collected.sampleCount.toLocaleString()} samples · ${duration} s · ${quality}`;
+          return item;
+        }),
+      );
+    },
+
+    setCollectionState(snapshot) {
+      const collecting = snapshot.status === "collecting";
+      fixtureSelect.disabled = collecting;
+      collectFixtureBtn.disabled = collecting || options.fixtures.length === 0;
+      collectFixtureBtn.textContent = collecting
+        ? `Collecting ${snapshot.sampleCount.toLocaleString()} samples…`
+        : "Collect fixture";
+      collectionSummaryEl.textContent = snapshot.message;
+      collectionSummaryEl.dataset.status = snapshot.status;
     },
 
     setSourceState(source, isActive, sourceName = "") {

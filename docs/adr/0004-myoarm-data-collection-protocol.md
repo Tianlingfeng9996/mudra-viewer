@@ -99,5 +99,7 @@ metrics.
 - Bluetooth and fixture decoding publish sample-major `SampleChunk` values
   through `src/signal/`, which has no dependency on MyoArm. Display and MyoArm
   are independent subscribers.
-- The next implementation step is a fixture-fed collection state machine
-  followed by IndexedDB persistence.
+- A fixture-fed collection state machine can capture a playback into a labelled
+  in-memory `MyoArmSegment` without changing the original Play button's meaning.
+- The next implementation step is IndexedDB persistence for datasets, sessions,
+  and segments.
