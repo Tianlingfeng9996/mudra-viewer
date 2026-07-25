@@ -331,6 +331,87 @@
       .myoarm-card .myoarm-split-warning {
         margin-top: 8px; color: #8a6d3b; font-size: 10px;
       }
+      .myoarm-training-controls {
+        display: grid; grid-template-columns: 82px auto 1fr;
+        align-items: end; gap: 8px; margin-top: 14px; padding-top: 12px;
+        border-top: 1px solid #e8e6dd;
+      }
+      .myoarm-training-controls label {
+        display: grid; gap: 4px; color: #6b6858; font-size: 11px;
+      }
+      .myoarm-training-controls input {
+        min-width: 0; padding: 7px 8px; border: 1px solid #c9c5b7;
+        border-radius: 6px; background: #fff; color: #3d3d3a; font: inherit;
+      }
+      .myoarm-training-controls button {
+        padding: 8px 12px; border: 0; border-radius: 6px;
+        background: #6b6858; color: #fff; cursor: pointer;
+        font: inherit; font-weight: 700;
+      }
+      .myoarm-training-controls button:disabled {
+        cursor: not-allowed; opacity: 0.45;
+      }
+      .myoarm-training-state {
+        align-self: center; color: #6b6858; font-size: 10px;
+      }
+      .myoarm-card .myoarm-ann-architecture,
+      .myoarm-card .myoarm-training-note {
+        color: #6b6858; font-size: 10px;
+      }
+      .myoarm-loss-panel {
+        display: grid; grid-template-columns: minmax(0, 2fr) minmax(150px, 1fr);
+        gap: 10px; margin-top: 10px;
+      }
+      .myoarm-loss-panel canvas {
+        width: 100%; height: 150px; border: 1px solid #e8e6dd;
+        border-radius: 7px; background: #fff;
+      }
+      .myoarm-training-metrics {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0;
+      }
+      .myoarm-training-metrics div {
+        min-width: 0; padding: 8px; border-radius: 6px; background: #f2f0e8;
+      }
+      .myoarm-training-metrics dt { color: #8a877a; font-size: 9px; }
+      .myoarm-training-metrics dd {
+        margin: 2px 0 0; color: #3d3d3a; font-size: 11px;
+        font-weight: 700; overflow-wrap: anywhere;
+      }
+      .myoarm-inference-card { min-height: 0; }
+      .myoarm-prediction {
+        display: flex; align-items: baseline; justify-content: space-between;
+        gap: 12px; margin-top: 14px; padding: 12px;
+        border-radius: 8px; background: #f2f0e8;
+      }
+      .myoarm-prediction strong {
+        color: #214f88; font-size: clamp(22px, 5vw, 34px);
+        text-transform: capitalize;
+      }
+      .myoarm-prediction span { color: #6b6858; font-size: 11px; }
+      .myoarm-probabilities {
+        display: grid; gap: 7px; margin-top: 12px;
+      }
+      .myoarm-probabilities > div {
+        display: grid; grid-template-columns: 72px minmax(80px, 1fr) 46px;
+        align-items: center; gap: 7px; font-size: 10px;
+      }
+      .myoarm-probabilities > div > span {
+        color: #6b6858; text-transform: capitalize;
+      }
+      .myoarm-probabilities > div > div {
+        height: 7px; overflow: hidden; border-radius: 999px;
+        background: #e8e6dd;
+      }
+      .myoarm-probabilities i {
+        display: block; height: 100%; border-radius: inherit;
+        background: #c96442; transition: width 100ms linear;
+      }
+      .myoarm-probabilities strong {
+        color: #3d3d3a; text-align: right;
+      }
+      .myoarm-card .myoarm-inference-meta {
+        margin-top: 10px; color: #8a877a; font-size: 10px;
+      }
       .myoarm-card:last-child { grid-column: 1 / -1; min-height: 220px; }
       @media (max-width: 700px) {
         #myoarm { padding: 20px 14px 76px; }
@@ -341,6 +422,9 @@
         .myoarm-channel-stats { grid-template-columns: 1fr; }
         .myoarm-waveform-wrap { height: 420px; }
         .myoarm-split-grid { grid-template-columns: 1fr; }
+        .myoarm-training-controls { grid-template-columns: 82px 1fr; }
+        .myoarm-training-state { grid-column: 1 / -1; }
+        .myoarm-loss-panel { grid-template-columns: 1fr; }
       }
       #spikes-info {
         position: absolute; bottom: 12px; right: 12px; z-index: 1;

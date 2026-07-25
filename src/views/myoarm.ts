@@ -10,6 +10,7 @@ import {
 import type { CollectorSnapshot } from "../myoarm/collector";
 import type { MyoArmSegment } from "../myoarm/types";
 import {
+  PREPROCESSING_CONFIG_V1,
   prepareMyoArmDataset,
   type PreparedMyoArmDataset,
   type PreprocessingIssueCode,
@@ -20,7 +21,19 @@ import {
   type DatasetGroupBy,
   type DatasetPartition,
   type DatasetPartitionName,
+  type GroupedDatasetSplit,
 } from "../myoarm/split";
+import {
+  BASELINE_ANN_CONFIG_V1,
+  trainBaselineAnn,
+  type TrainingEpochMetrics,
+} from "../myoarm/baseline-ann";
+import type {
+  ClassificationMetrics,
+  ClassificationPrediction,
+  TrainedMyoArmClassifier,
+} from "../myoarm/classifier";
+import { createLiveWindowStream } from "../myoarm/live-inference";
 import {
   calculateChannelStatistics,
   createMyoArmSegmentPlot,
@@ -202,10 +215,42 @@ export function createMyoArmView(
         <p class="myoarm-split-warning" data-role="split-warning">
           At least three independent groups per observed label are required.
         </p>
+        <div class="myoarm-training-controls">
+          <label>
+            Epochs
+            <input data-role="training-epochs" type="number" min="5" max="100" step="5" value="${BASELINE_ANN_CONFIG_V1.epochCount}">
+          </label>
+          <button type="button" data-role="train-ann" disabled>Train baseline ANN</button>
+          <span class="myoarm-training-state" data-role="training-state">Waiting for a ready split</span>
+        </div>
+        <p class="myoarm-ann-architecture" data-role="ann-architecture">
+          501 inputs → ${BASELINE_ANN_CONFIG_V1.hiddenUnitCount} ReLU units → observed labels · Adam optimizer
+        </p>
+        <div class="myoarm-loss-panel">
+          <canvas data-role="loss-chart" aria-label="Training and validation loss chart"></canvas>
+          <dl class="myoarm-training-metrics">
+            <div><dt>Epoch</dt><dd data-role="metric-epoch">—</dd></div>
+            <div><dt>Train loss</dt><dd data-role="metric-train-loss">—</dd></div>
+            <div><dt>Validation loss</dt><dd data-role="metric-validation-loss">—</dd></div>
+            <div><dt>Test accuracy</dt><dd data-role="metric-test-accuracy">—</dd></div>
+          </dl>
+        </div>
+        <p class="myoarm-training-note" data-role="training-note">
+          The model stays in memory after training. Fixture metrics verify execution only and are not evidence of real-world accuracy.
+        </p>
       </article>
-      <article class="myoarm-card">
+      <article class="myoarm-card myoarm-inference-card">
+        <span class="myoarm-state" data-role="inference-state">No model</span>
         <h3>Inference</h3>
-        <p>Real-time prediction output will appear here.</p>
+        <p>Play any built-in recording after training. A new prediction is produced every 100 ms from a 200 ms window.</p>
+        <div class="myoarm-prediction">
+          <strong data-role="prediction-label">—</strong>
+          <span data-role="prediction-confidence">Train a model first</span>
+        </div>
+        <div class="myoarm-probabilities" data-role="prediction-scores"></div>
+        <p class="myoarm-inference-meta" data-role="inference-meta">
+          The live stream uses the same channel order, scaling, and window size as training.
+        </p>
       </article>
       <article class="myoarm-card">
         <h3>Hand visualization</h3>
@@ -285,6 +330,36 @@ export function createMyoArmView(
     root.querySelector<HTMLElement>("[data-role=split-state]")!;
   const splitWarningEl =
     root.querySelector<HTMLElement>("[data-role=split-warning]")!;
+  const trainingEpochsInput =
+    root.querySelector<HTMLInputElement>("[data-role=training-epochs]")!;
+  const trainAnnButton =
+    root.querySelector<HTMLButtonElement>("[data-role=train-ann]")!;
+  const trainingStateEl =
+    root.querySelector<HTMLElement>("[data-role=training-state]")!;
+  const annArchitectureEl =
+    root.querySelector<HTMLElement>("[data-role=ann-architecture]")!;
+  const lossCanvas =
+    root.querySelector<HTMLCanvasElement>("[data-role=loss-chart]")!;
+  const metricEpochEl =
+    root.querySelector<HTMLElement>("[data-role=metric-epoch]")!;
+  const metricTrainLossEl =
+    root.querySelector<HTMLElement>("[data-role=metric-train-loss]")!;
+  const metricValidationLossEl =
+    root.querySelector<HTMLElement>("[data-role=metric-validation-loss]")!;
+  const metricTestAccuracyEl =
+    root.querySelector<HTMLElement>("[data-role=metric-test-accuracy]")!;
+  const trainingNoteEl =
+    root.querySelector<HTMLElement>("[data-role=training-note]")!;
+  const inferenceStateEl =
+    root.querySelector<HTMLElement>("[data-role=inference-state]")!;
+  const predictionLabelEl =
+    root.querySelector<HTMLElement>("[data-role=prediction-label]")!;
+  const predictionConfidenceEl =
+    root.querySelector<HTMLElement>("[data-role=prediction-confidence]")!;
+  const predictionScoresEl =
+    root.querySelector<HTMLElement>("[data-role=prediction-scores]")!;
+  const inferenceMetaEl =
+    root.querySelector<HTMLElement>("[data-role=inference-meta]")!;
 
   const splitPartitionElements = new Map<
     DatasetPartitionName,
@@ -347,6 +422,14 @@ export function createMyoArmView(
   let storedSegmentCount = 0;
   let selectedSegmentId: string | null = null;
   let preparedDataset: PreparedMyoArmDataset | null = null;
+  let currentSplit: GroupedDatasetSplit | null = null;
+  let trainedModel: TrainedMyoArmClassifier | null = null;
+  let training = false;
+  let trainingAbortController: AbortController | null = null;
+  let trainingHistory: TrainingEpochMetrics[] = [];
+  let predictionHistory: ClassificationPrediction[] = [];
+  let predictionWindowCount = 0;
+  const liveWindowStream = createLiveWindowStream();
 
   const preprocessingIssueLabel: Record<PreprocessingIssueCode, string> = {
     "quality-rejected": "quality rejected",
@@ -386,6 +469,128 @@ export function createMyoArmView(
     );
   };
 
+  const drawLossHistory = () => {
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.max(lossCanvas.clientWidth, 320);
+    const height = Math.max(lossCanvas.clientHeight, 150);
+    lossCanvas.width = Math.round(width * ratio);
+    lossCanvas.height = Math.round(height * ratio);
+    const context = lossCanvas.getContext("2d");
+    if (!context) return;
+    context.scale(ratio, ratio);
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, width, height);
+
+    const left = 38;
+    const right = 10;
+    const top = 12;
+    const bottom = 25;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+    context.strokeStyle = "#d7d4ca";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(left, top);
+    context.lineTo(left, top + plotHeight);
+    context.lineTo(left + plotWidth, top + plotHeight);
+    context.stroke();
+    context.fillStyle = "#8a877a";
+    context.font = "10px system-ui";
+    context.fillText("Loss", 6, 12);
+    context.fillText("Epoch", width - 40, height - 6);
+
+    if (!trainingHistory.length) {
+      context.fillStyle = "#aaa69a";
+      context.fillText("Loss appears here during training", left + 16, top + plotHeight / 2);
+      return;
+    }
+
+    const losses = trainingHistory.flatMap((entry) => [
+      entry.train.loss,
+      entry.validation.loss,
+    ]);
+    const maximumLoss = Math.max(...losses, 0.01);
+    context.fillStyle = "#8a877a";
+    context.fillText(maximumLoss.toFixed(2), 4, top + 4);
+    context.fillText("0", 24, top + plotHeight + 4);
+
+    const drawSeries = (
+      color: string,
+      valueFor: (entry: TrainingEpochMetrics) => number,
+    ) => {
+      context.strokeStyle = color;
+      context.lineWidth = 2;
+      context.beginPath();
+      trainingHistory.forEach((entry, index) => {
+        const x =
+          left +
+          (trainingHistory.length === 1
+            ? 0
+            : (index / (trainingHistory.length - 1)) * plotWidth);
+        const y =
+          top + plotHeight - (valueFor(entry) / maximumLoss) * plotHeight;
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      });
+      context.stroke();
+    };
+    drawSeries("#c96442", (entry) => entry.train.loss);
+    drawSeries("#214f88", (entry) => entry.validation.loss);
+    context.fillStyle = "#c96442";
+    context.fillText("Train", left + 6, height - 6);
+    context.fillStyle = "#214f88";
+    context.fillText("Validation", left + 44, height - 6);
+  };
+
+  const renderInferenceIdle = (message: string) => {
+    inferenceStateEl.textContent = trainedModel ? "Model ready" : "No model";
+    inferenceStateEl.classList.toggle("live", Boolean(trainedModel));
+    predictionLabelEl.textContent = "—";
+    predictionConfidenceEl.textContent = message;
+    predictionScoresEl.replaceChildren();
+    inferenceMetaEl.textContent = trainedModel
+      ? `${trainedModel.id} · ${trainedModel.labels.join(", ")} · awaiting a new stream`
+      : "Train the baseline ANN before playing a fixture for prediction.";
+  };
+
+  const updateTrainingControls = () => {
+    const trainable =
+      Boolean(currentSplit?.ready) &&
+      (currentSplit?.observedLabels.length ?? 0) >= 2;
+    trainAnnButton.disabled = training || active || !trainable;
+    trainingEpochsInput.disabled = training;
+    if (!training && !trainable) {
+      trainingStateEl.textContent =
+        currentSplit?.ready
+          ? "At least two labels are required"
+          : "Waiting for a ready split";
+    } else if (!training && trainedModel) {
+      trainingStateEl.textContent = "Model trained";
+    } else if (!training) {
+      trainingStateEl.textContent = "Ready to train";
+    }
+  };
+
+  const invalidateTrainedModel = (reason: string) => {
+    trainingAbortController?.abort();
+    trainingAbortController = null;
+    training = false;
+    trainedModel = null;
+    trainingHistory = [];
+    predictionHistory = [];
+    predictionWindowCount = 0;
+    liveWindowStream.reset();
+    metricEpochEl.textContent = "—";
+    metricTrainLossEl.textContent = "—";
+    metricValidationLossEl.textContent = "—";
+    metricTestAccuracyEl.textContent = "—";
+    trainingNoteEl.textContent = reason;
+    drawLossHistory();
+    renderInferenceIdle("Train a model first");
+    updateTrainingControls();
+  };
+
   const renderDatasetSplit = () => {
     const groupBy = splitGroupingSelect.value as DatasetGroupBy;
     if (!preparedDataset) return;
@@ -393,12 +598,14 @@ export function createMyoArmView(
       ...DATASET_SPLIT_CONFIG_V1,
       groupBy,
     });
+    currentSplit = split;
     renderPartition(split.partitions.train, groupBy);
     renderPartition(split.partitions.validation, groupBy);
     renderPartition(split.partitions.test, groupBy);
 
     splitStateEl.textContent = split.ready ? "Ready" : "Not ready";
     splitStateEl.classList.toggle("ready", split.ready);
+    updateTrainingControls();
     if (!split.observedLabels.length) {
       splitWarningEl.textContent =
         "Collect or import accepted segments before creating a split.";
@@ -432,7 +639,158 @@ export function createMyoArmView(
       `Not ready for evaluation. Missing label coverage — ${missingCoverage.join("; ")}. ${requirement}`;
   };
 
-  splitGroupingSelect.addEventListener("change", renderDatasetSplit);
+  splitGroupingSelect.addEventListener("change", () => {
+    invalidateTrainedModel(
+      "The grouping mode changed. Train a new model before using live inference.",
+    );
+    renderDatasetSplit();
+  });
+
+  const formatMetrics = (metrics: ClassificationMetrics) =>
+    `${(metrics.accuracy * 100).toFixed(1)}% accuracy · loss ${metrics.loss.toFixed(4)}`;
+
+  const trainAnn = async () => {
+    if (!preparedDataset || !currentSplit?.ready || training || active) return;
+    const splitAtStart = currentSplit;
+    const epochCount = Math.max(
+      5,
+      Math.min(100, Math.round(Number(trainingEpochsInput.value) || 30)),
+    );
+    trainingEpochsInput.value = String(epochCount);
+    trainingAbortController?.abort();
+    const controller = new AbortController();
+    trainingAbortController = controller;
+    training = true;
+    trainedModel = null;
+    trainingHistory = [];
+    predictionHistory = [];
+    predictionWindowCount = 0;
+    trainingStateEl.textContent = "Training…";
+    trainingNoteEl.textContent =
+      "Training uses only Train windows; Validation is measured after each epoch. Test is evaluated once after training.";
+    metricEpochEl.textContent = `0 / ${epochCount}`;
+    metricTrainLossEl.textContent = "—";
+    metricValidationLossEl.textContent = "—";
+    metricTestAccuracyEl.textContent = "Held out";
+    annArchitectureEl.textContent =
+      `${preparedDataset.summary.inputValueCount} inputs → ` +
+      `${BASELINE_ANN_CONFIG_V1.hiddenUnitCount} ReLU units → ` +
+      `${splitAtStart.observedLabels.length} Softmax outputs · Adam optimizer`;
+    drawLossHistory();
+    renderInferenceIdle("Training in progress");
+    updateTrainingControls();
+
+    try {
+      const result = await trainBaselineAnn({
+        trainWindows: splitAtStart.partitions.train.windows,
+        validationWindows: splitAtStart.partitions.validation.windows,
+        labels: splitAtStart.observedLabels,
+        inputValueCount: preparedDataset.summary.inputValueCount,
+        config: { epochCount },
+        signal: controller.signal,
+        onEpoch(metrics) {
+          if (controller.signal.aborted) return;
+          trainingHistory.push(metrics);
+          metricEpochEl.textContent = `${metrics.epoch} / ${epochCount}`;
+          metricTrainLossEl.textContent = metrics.train.loss.toFixed(4);
+          metricValidationLossEl.textContent =
+            metrics.validation.loss.toFixed(4);
+          trainingStateEl.textContent =
+            `Epoch ${metrics.epoch}: train ${metrics.train.loss.toFixed(4)} · ` +
+            `validation ${metrics.validation.loss.toFixed(4)}`;
+          drawLossHistory();
+        },
+      });
+      if (controller.signal.aborted || currentSplit !== splitAtStart) return;
+
+      trainedModel = result.model;
+      const finalMetrics = result.history[result.history.length - 1];
+      const testMetrics = trainedModel.evaluate(
+        splitAtStart.partitions.test.windows,
+      );
+      metricTestAccuracyEl.textContent =
+        `${(testMetrics.accuracy * 100).toFixed(1)}%`;
+      trainingStateEl.textContent = "Training complete";
+      trainingNoteEl.textContent =
+        `Final train: ${formatMetrics(finalMetrics.train)}. ` +
+        `Validation: ${formatMetrics(finalMetrics.validation)}. ` +
+        `Held-out test: ${formatMetrics(testMetrics)}. ` +
+        "Fixture results are a pipeline check, not a real-world performance claim.";
+      renderInferenceIdle("Play a fixture to start prediction");
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        trainingStateEl.textContent = "Training failed";
+        trainingNoteEl.textContent = (error as Error).message;
+        renderInferenceIdle("Training failed");
+      }
+    } finally {
+      if (trainingAbortController === controller) {
+        trainingAbortController = null;
+        training = false;
+        updateTrainingControls();
+      }
+    }
+  };
+
+  trainAnnButton.addEventListener("click", () => {
+    void trainAnn();
+  });
+
+  const smoothPrediction = (
+    prediction: ClassificationPrediction,
+  ): ClassificationPrediction => {
+    predictionHistory.push(prediction);
+    if (predictionHistory.length > 5) predictionHistory.shift();
+    const scores = prediction.scores.map(({ label }, index) => ({
+      label,
+      probability:
+        predictionHistory.reduce(
+          (total, item) => total + item.scores[index].probability,
+          0,
+        ) / predictionHistory.length,
+    }));
+    const best = scores.reduce((current, candidate) =>
+      candidate.probability > current.probability ? candidate : current,
+    );
+    return {
+      label: best.label,
+      confidence: best.probability,
+      scores,
+    };
+  };
+
+  const renderPrediction = (
+    prediction: ClassificationPrediction,
+    endSampleExclusive: number,
+  ) => {
+    inferenceStateEl.textContent = "Predicting";
+    inferenceStateEl.classList.add("live");
+    predictionLabelEl.textContent = prediction.label;
+    predictionConfidenceEl.textContent =
+      `${(prediction.confidence * 100).toFixed(1)}% confidence`;
+    predictionScoresEl.replaceChildren(
+      ...[...prediction.scores]
+        .sort((left, right) => right.probability - left.probability)
+        .map((score) => {
+          const row = document.createElement("div");
+          const label = document.createElement("span");
+          const track = document.createElement("div");
+          const fill = document.createElement("i");
+          const value = document.createElement("strong");
+          label.textContent = score.label;
+          fill.style.width = `${Math.max(0, Math.min(100, score.probability * 100))}%`;
+          value.textContent = `${(score.probability * 100).toFixed(1)}%`;
+          track.append(fill);
+          row.append(label, track, value);
+          return row;
+        }),
+    );
+    inferenceMetaEl.textContent =
+      `${activeSourceName || sourceLabel(activeSource)} · ` +
+      `window ${predictionWindowCount.toLocaleString()} · ` +
+      `through sample ${endSampleExclusive.toLocaleString()} · ` +
+      "5-window probability average";
+  };
 
   const renderPreprocessingSummary = (
     segments: readonly MyoArmSegment[],
@@ -599,6 +957,9 @@ export function createMyoArmView(
     if (!renderRaf) renderRaf = requestAnimationFrame(renderStats);
   };
 
+  drawLossHistory();
+  renderInferenceIdle("Train a model first");
+
   return {
     acceptSamples(chunk) {
       const channelCount = chunk.channels.length;
@@ -607,13 +968,31 @@ export function createMyoArmView(
         active = true;
         activeSourceName = "";
         sampleCount = 0;
+        liveWindowStream.reset();
+        predictionHistory = [];
+        predictionWindowCount = 0;
       }
       activeSource = chunk.source;
       sampleCount += Math.floor(chunk.samples.length / channelCount);
+      if (trainedModel) {
+        const windows = liveWindowStream.acceptSamples(chunk);
+        for (const window of windows) {
+          predictionWindowCount++;
+          renderPrediction(
+            smoothPrediction(trainedModel.predict(window.values)),
+            window.endSampleExclusive,
+          );
+        }
+      }
       scheduleRender();
     },
 
     setCollectedSegments(segments) {
+      if (trainedModel || training) {
+        invalidateTrainedModel(
+          "The saved dataset changed. Retrain the ANN so its weights and reported split remain consistent.",
+        );
+      }
       storedSegmentCount = segments.length;
       renderPreprocessingSummary(segments);
       if (!segments.length) {
@@ -688,7 +1067,27 @@ export function createMyoArmView(
       activeSource = source;
       activeSourceName = sourceName;
       active = isActive;
-      if (startingNewStream) sampleCount = 0;
+      if (startingNewStream) {
+        sampleCount = 0;
+        liveWindowStream.reset();
+        predictionHistory = [];
+        predictionWindowCount = 0;
+        if (trainedModel) {
+          renderInferenceIdle(
+            `Buffering the first ${PREPROCESSING_CONFIG_V1.windowDurationMs} ms window…`,
+          );
+        }
+      } else if (!isActive) {
+        liveWindowStream.reset();
+        predictionHistory = [];
+        if (trainedModel) {
+          inferenceStateEl.textContent = predictionWindowCount
+            ? "Stream finished"
+            : "Model ready";
+          inferenceStateEl.classList.remove("live");
+        }
+      }
+      updateTrainingControls();
       scheduleRender();
     },
   };

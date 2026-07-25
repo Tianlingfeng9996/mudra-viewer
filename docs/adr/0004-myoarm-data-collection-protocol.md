@@ -139,6 +139,34 @@ One segment per label, or one session containing all labels, is intentionally
 not enough for evaluation. Such data remains useful for checking execution of
 the preprocessing and model-training code.
 
+### Baseline ANN and live inference v1
+
+`myoarm-baseline-ann-v1` provides the first end-to-end browser training loop:
+
+- the currently selected grouped split supplies train, validation, and test
+  windows;
+- only train windows update model weights;
+- validation cross-entropy and accuracy are recalculated after every epoch;
+- test metrics are calculated once after training completes;
+- the model has 501 input values, 16 ReLU hidden units, and one Softmax output
+  per observed gesture label;
+- mini-batch Adam uses deterministic weight initialization and shuffle order;
+- trained weights remain in memory and are invalidated when the saved dataset
+  or grouping mode changes.
+
+The runtime model contract is independent of the baseline implementation so a
+future TF2AngleNet adapter can drive the same training and inference UI.
+
+Live inference accumulates decoded `SampleChunk` values into the same 167-sample
+windows used offline. It emits a prediction every 83 samples, presents a
+five-window moving average of class probabilities, and resets at every source
+boundary so samples from separate recordings cannot enter one model input.
+
+Built-in fixtures can verify loss calculation, optimizer execution, live
+windowing, and prediction display without hardware. Replaying one recording as
+multiple segment identifiers does not create independent biological examples,
+so fixture validation/test metrics must not be reported as model performance.
+
 ## Consequences
 
 - Data collection, storage, and training UI can be implemented without waiting
@@ -162,6 +190,8 @@ the preprocessing and model-training code.
   the baseline ANN and TF2AngleNet integration.
 - Grouped splitting now prevents overlapping-window leakage and reports label
   coverage for both repetition-level and session-level evaluation.
-- The next implementation step is a minimal baseline ANN training loop that
-  consumes only the train partition, tunes against validation, and reports the
-  final held-out test result once.
+- A baseline ANN can now be trained and evaluated in the browser, then reused
+  immediately for fixture or Bluetooth stream predictions.
+- The next implementation step is model export/import with preprocessing and
+  label metadata, followed by a TF2AngleNet adapter implementing the shared
+  classifier contract.
