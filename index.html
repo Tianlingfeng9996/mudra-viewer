@@ -412,6 +412,34 @@
       .myoarm-card .myoarm-inference-meta {
         margin-top: 10px; color: #8a877a; font-size: 10px;
       }
+      .myoarm-mujoco-controls {
+        display: flex; align-items: center; gap: 10px; margin-top: 16px;
+      }
+      .myoarm-mujoco-controls button {
+        flex: 0 0 auto; padding: 8px 14px; border: 0; border-radius: 6px;
+        background: #6b6858; color: #fff; cursor: pointer;
+        font: inherit; font-weight: 700;
+      }
+      .myoarm-mujoco-controls button:disabled {
+        cursor: not-allowed; opacity: 0.55;
+      }
+      .myoarm-mujoco-controls span {
+        color: #6b6858; font-size: 11px;
+      }
+      .myoarm-mujoco-controls [data-status="error"] { color: #d92d20; }
+      .myoarm-mujoco-stats {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px; margin: 14px 0 0;
+      }
+      .myoarm-mujoco-stats div {
+        min-width: 0; padding: 9px 10px; border-radius: 6px;
+        background: #f2f0e8;
+      }
+      .myoarm-mujoco-stats dt { color: #8a877a; font-size: 10px; }
+      .myoarm-mujoco-stats dd {
+        margin: 3px 0 0; color: #3d3d3a; font-size: 11px;
+        font-weight: 600; overflow-wrap: anywhere;
+      }
       .myoarm-card:last-child { grid-column: 1 / -1; min-height: 220px; }
       @media (max-width: 700px) {
         #myoarm { padding: 20px 14px 76px; }
@@ -425,6 +453,8 @@
         .myoarm-training-controls { grid-template-columns: 82px 1fr; }
         .myoarm-training-state { grid-column: 1 / -1; }
         .myoarm-loss-panel { grid-template-columns: 1fr; }
+        .myoarm-mujoco-controls { align-items: stretch; flex-direction: column; }
+        .myoarm-mujoco-stats { grid-template-columns: 1fr; }
       }
       #spikes-info {
         position: absolute; bottom: 12px; right: 12px; z-index: 1;

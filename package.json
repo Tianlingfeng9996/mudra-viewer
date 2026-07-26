@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mujoco/mujoco": "3.10.0",
     "ml-matrix": "^6.13.0",
     "ml-pca": "^4.1.1",
     "mudraka": "^0.3.1"

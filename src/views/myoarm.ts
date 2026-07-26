@@ -38,6 +38,7 @@ import {
   calculateChannelStatistics,
   createMyoArmSegmentPlot,
 } from "./myoarm-segment";
+import { loadMujocoRuntime } from "../simulation/mujoco-runtime";
 
 export interface MyoArmView {
   acceptSamples(chunk: SampleChunk): void;
@@ -252,9 +253,22 @@ export function createMyoArmView(
           The live stream uses the same channel order, scaling, and window size as training.
         </p>
       </article>
-      <article class="myoarm-card">
+      <article class="myoarm-card myoarm-hand-card">
+        <span class="myoarm-state" data-role="mujoco-state">Not loaded</span>
         <h3>Hand visualization</h3>
-        <p>The inferred hand pose visualization will appear here.</p>
+        <p>
+          MuJoCo is an optional simulation runtime. It is downloaded and initialized
+          only after you request it, so data collection and ANN training stay lightweight.
+        </p>
+        <div class="myoarm-mujoco-controls">
+          <button type="button" data-role="initialize-mujoco">Initialize MuJoCo</button>
+          <span data-role="mujoco-message">No MuJoCo resources have been requested.</span>
+        </div>
+        <dl class="myoarm-mujoco-stats">
+          <div><dt>Runtime</dt><dd>Official single-thread WebAssembly</dd></div>
+          <div><dt>Engine</dt><dd data-role="mujoco-version">Not loaded</dd></div>
+          <div><dt>Hand model</dt><dd>Not loaded — Shadow Hand is the next milestone</dd></div>
+        </dl>
       </article>
     </div>
   `;
@@ -360,6 +374,44 @@ export function createMyoArmView(
     root.querySelector<HTMLElement>("[data-role=prediction-scores]")!;
   const inferenceMetaEl =
     root.querySelector<HTMLElement>("[data-role=inference-meta]")!;
+  const mujocoStateEl =
+    root.querySelector<HTMLElement>("[data-role=mujoco-state]")!;
+  const initializeMujocoButton =
+    root.querySelector<HTMLButtonElement>("[data-role=initialize-mujoco]")!;
+  const mujocoMessageEl =
+    root.querySelector<HTMLElement>("[data-role=mujoco-message]")!;
+  const mujocoVersionEl =
+    root.querySelector<HTMLElement>("[data-role=mujoco-version]")!;
+
+  initializeMujocoButton.addEventListener("click", async () => {
+    initializeMujocoButton.disabled = true;
+    initializeMujocoButton.textContent = "Initializing…";
+    mujocoStateEl.textContent = "Loading";
+    mujocoStateEl.classList.add("live");
+    mujocoMessageEl.dataset.status = "loading";
+    mujocoMessageEl.textContent =
+      "Downloading the optional runtime and compiling its WebAssembly module…";
+
+    try {
+      const runtime = await loadMujocoRuntime();
+      mujocoStateEl.textContent = "Ready";
+      initializeMujocoButton.textContent = "MuJoCo initialized";
+      mujocoVersionEl.textContent =
+        `${runtime.version} (${runtime.versionNumber})`;
+      mujocoMessageEl.dataset.status = "ready";
+      mujocoMessageEl.textContent =
+        "Runtime ready. No model or physics loop has been created yet.";
+    } catch (error) {
+      mujocoStateEl.textContent = "Load failed";
+      mujocoStateEl.classList.remove("live");
+      initializeMujocoButton.disabled = false;
+      initializeMujocoButton.textContent = "Retry MuJoCo";
+      mujocoVersionEl.textContent = "Not loaded";
+      mujocoMessageEl.dataset.status = "error";
+      mujocoMessageEl.textContent =
+        error instanceof Error ? error.message : "MuJoCo initialization failed.";
+    }
+  });
 
   const splitPartitionElements = new Map<
     DatasetPartitionName,
