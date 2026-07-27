@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node -e \"require('node:fs').copyFileSync('dist/index.html', 'dist/404.html')\"",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify:mujoco": "node scripts/verify-shadow-hand.mjs"
   },
   "dependencies": {
     "@mujoco/mujoco": "3.10.0",

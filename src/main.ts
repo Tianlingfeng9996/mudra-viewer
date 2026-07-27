@@ -786,7 +786,8 @@ connectBtn.addEventListener("click", () =>
 );
 
 // Tab close / reload: best-effort graceful stop before we go — the async write may not flush, but gatt.disconnect() drops the link; pagehide also covers bfcache nav.
-window.addEventListener("pagehide", () => {
+window.addEventListener("pagehide", (event) => {
+  if (!event.persisted) myoArmView.dispose();
   if (!device?.gatt?.connected) return;
   cmdChar?.writeValue(DISABLE_SNC).catch(() => {});
   device.gatt.disconnect();
@@ -795,6 +796,7 @@ window.addEventListener("pagehide", () => {
 // HMR reloads leave the BLE link up; unlike pagehide, dispose() can await a full stop.
 if (import.meta.hot) {
   import.meta.hot.dispose(async () => {
+    myoArmView.dispose();
     await myoArmStorage.close();
     if (!device?.gatt?.connected) return;
     try {

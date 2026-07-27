@@ -39,9 +39,14 @@ import {
   createMyoArmSegmentPlot,
 } from "./myoarm-segment";
 import { loadMujocoRuntime } from "../simulation/mujoco-runtime";
+import {
+  loadShadowHandModel,
+  type ShadowHandModel,
+} from "../simulation/shadow-hand-model";
 
 export interface MyoArmView {
   acceptSamples(chunk: SampleChunk): void;
+  dispose(): void;
   setCollectedSegments(segments: readonly MyoArmSegment[]): void;
   setCollectionState(snapshot: CollectorSnapshot): void;
   setPersistenceState(
@@ -267,7 +272,7 @@ export function createMyoArmView(
         <dl class="myoarm-mujoco-stats">
           <div><dt>Runtime</dt><dd>Official single-thread WebAssembly</dd></div>
           <div><dt>Engine</dt><dd data-role="mujoco-version">Not loaded</dd></div>
-          <div><dt>Hand model</dt><dd>Not loaded — Shadow Hand is the next milestone</dd></div>
+          <div><dt>Hand model</dt><dd data-role="shadow-hand-model">Not loaded</dd></div>
         </dl>
       </article>
     </div>
@@ -382,6 +387,9 @@ export function createMyoArmView(
     root.querySelector<HTMLElement>("[data-role=mujoco-message]")!;
   const mujocoVersionEl =
     root.querySelector<HTMLElement>("[data-role=mujoco-version]")!;
+  const shadowHandModelEl =
+    root.querySelector<HTMLElement>("[data-role=shadow-hand-model]")!;
+  let shadowHandModel: ShadowHandModel | null = null;
 
   initializeMujocoButton.addEventListener("click", async () => {
     initializeMujocoButton.disabled = true;
@@ -394,19 +402,27 @@ export function createMyoArmView(
 
     try {
       const runtime = await loadMujocoRuntime();
+      shadowHandModel = await loadShadowHandModel(runtime);
       mujocoStateEl.textContent = "Ready";
-      initializeMujocoButton.textContent = "MuJoCo initialized";
+      initializeMujocoButton.textContent = "Shadow Hand loaded";
       mujocoVersionEl.textContent =
         `${runtime.version} (${runtime.versionNumber})`;
+      const { stats } = shadowHandModel;
+      shadowHandModelEl.textContent =
+        `E3M5 right · ${stats.degreesOfFreedom} DoF · ` +
+        `${stats.actuators} actuators · ${stats.meshes} meshes`;
       mujocoMessageEl.dataset.status = "ready";
       mujocoMessageEl.textContent =
-        "Runtime ready. No model or physics loop has been created yet.";
+        "Model compiled into MjModel/MjData. Rendering is the next milestone.";
     } catch (error) {
+      shadowHandModel?.dispose();
+      shadowHandModel = null;
       mujocoStateEl.textContent = "Load failed";
       mujocoStateEl.classList.remove("live");
       initializeMujocoButton.disabled = false;
       initializeMujocoButton.textContent = "Retry MuJoCo";
       mujocoVersionEl.textContent = "Not loaded";
+      shadowHandModelEl.textContent = "Not loaded";
       mujocoMessageEl.dataset.status = "error";
       mujocoMessageEl.textContent =
         error instanceof Error ? error.message : "MuJoCo initialization failed.";
@@ -1037,6 +1053,11 @@ export function createMyoArmView(
         }
       }
       scheduleRender();
+    },
+
+    dispose() {
+      shadowHandModel?.dispose();
+      shadowHandModel = null;
     },
 
     setCollectedSegments(segments) {
