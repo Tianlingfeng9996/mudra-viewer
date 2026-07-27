@@ -44,6 +44,12 @@ import {
   type ShadowHandModel,
 } from "../simulation/shadow-hand-model";
 import type { MujocoThreeRenderer } from "../simulation/mujoco-three-renderer";
+import {
+  createShadowHandActionController,
+  SHADOW_HAND_POSES,
+  type ShadowHandActionController,
+  type ShadowHandPoseName,
+} from "../simulation/shadow-hand-actions";
 
 export interface MyoArmView {
   acceptSamples(chunk: SampleChunk): void;
@@ -275,6 +281,14 @@ export function createMyoArmView(
           <button type="button" data-role="initialize-mujoco">Initialize MuJoCo</button>
           <span data-role="mujoco-message">No MuJoCo resources have been requested.</span>
         </div>
+        <div class="myoarm-hand-actions" aria-label="Independent Shadow Hand action tests">
+          <span>Action test</span>
+          ${SHADOW_HAND_POSES.map(
+            (pose) =>
+              `<button type="button" data-hand-pose="${pose.name}" aria-pressed="false" disabled>${pose.label}</button>`,
+          ).join("")}
+          <span data-role="hand-action-message">Initialize MuJoCo to enable independent actions.</span>
+        </div>
         <dl class="myoarm-mujoco-stats">
           <div><dt>Runtime</dt><dd>Official single-thread WebAssembly</dd></div>
           <div><dt>Engine</dt><dd data-role="mujoco-version">Not loaded</dd></div>
@@ -397,8 +411,33 @@ export function createMyoArmView(
     root.querySelector<HTMLElement>("[data-role=shadow-hand-model]")!;
   const mujocoViewportEl =
     root.querySelector<HTMLElement>("[data-role=mujoco-viewport]")!;
+  const handActionButtons = Array.from(
+    root.querySelectorAll<HTMLButtonElement>("[data-hand-pose]"),
+  );
+  const handActionMessageEl =
+    root.querySelector<HTMLElement>("[data-role=hand-action-message]")!;
   let shadowHandModel: ShadowHandModel | null = null;
   let mujocoThreeRenderer: MujocoThreeRenderer | null = null;
+  let shadowHandActionController: ShadowHandActionController | null = null;
+
+  const selectHandPose = (name: ShadowHandPoseName) => {
+    if (!shadowHandActionController) return;
+    shadowHandActionController.setPose(name);
+    const pose = SHADOW_HAND_POSES.find((candidate) => candidate.name === name)!;
+    for (const button of handActionButtons) {
+      const selected = button.dataset.handPose === name;
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    }
+    handActionMessageEl.textContent =
+      `Moving to ${pose.label}. MuJoCo is driving all 20 actuators.`;
+  };
+
+  for (const button of handActionButtons) {
+    button.addEventListener("click", () => {
+      selectHandPose(button.dataset.handPose as ShadowHandPoseName);
+    });
+  }
 
   initializeMujocoButton.addEventListener("click", async () => {
     initializeMujocoButton.disabled = true;
@@ -412,6 +451,10 @@ export function createMyoArmView(
     try {
       const runtime = await loadMujocoRuntime();
       shadowHandModel = await loadShadowHandModel(runtime);
+      shadowHandActionController = createShadowHandActionController(
+        runtime,
+        shadowHandModel,
+      );
       const { createMujocoThreeRenderer } =
         await import("../simulation/mujoco-three-renderer");
       mujocoThreeRenderer = createMujocoThreeRenderer(
@@ -419,6 +462,11 @@ export function createMyoArmView(
         runtime,
         shadowHandModel,
       );
+      mujocoThreeRenderer.setSimulationStep((deltaSeconds) => {
+        shadowHandActionController?.step(deltaSeconds);
+      });
+      for (const button of handActionButtons) button.disabled = false;
+      selectHandPose("open");
       mujocoStateEl.textContent = "Ready";
       initializeMujocoButton.textContent = "Shadow Hand loaded";
       mujocoVersionEl.textContent =
@@ -433,8 +481,12 @@ export function createMyoArmView(
     } catch (error) {
       mujocoThreeRenderer?.dispose();
       mujocoThreeRenderer = null;
+      shadowHandActionController = null;
       shadowHandModel?.dispose();
       shadowHandModel = null;
+      for (const button of handActionButtons) button.disabled = true;
+      handActionMessageEl.textContent =
+        "Independent actions are unavailable until MuJoCo loads.";
       mujocoStateEl.textContent = "Load failed";
       mujocoStateEl.classList.remove("live");
       initializeMujocoButton.disabled = false;
@@ -1076,6 +1128,7 @@ export function createMyoArmView(
     dispose() {
       mujocoThreeRenderer?.dispose();
       mujocoThreeRenderer = null;
+      shadowHandActionController = null;
       shadowHandModel?.dispose();
       shadowHandModel = null;
     },

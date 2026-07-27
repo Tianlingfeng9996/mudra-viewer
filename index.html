@@ -441,6 +441,28 @@
         color: #6b6858; font-size: 11px;
       }
       .myoarm-mujoco-controls [data-status="error"] { color: #d92d20; }
+      .myoarm-hand-actions {
+        display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+        margin-top: 10px; padding: 10px; border-radius: 8px;
+        background: #f2f0e8;
+      }
+      .myoarm-hand-actions > span:first-child {
+        color: #3d3d3a; font-size: 11px; font-weight: 700;
+      }
+      .myoarm-hand-actions button {
+        padding: 7px 12px; border: 1px solid #c9c5b7; border-radius: 999px;
+        background: #fff; color: #4d4b42; cursor: pointer;
+        font: inherit; font-size: 11px; font-weight: 700;
+      }
+      .myoarm-hand-actions button.selected {
+        border-color: #456ce6; background: #e8efff; color: #355ed6;
+      }
+      .myoarm-hand-actions button:disabled {
+        cursor: not-allowed; opacity: 0.5;
+      }
+      .myoarm-hand-actions [data-role="hand-action-message"] {
+        flex: 1 1 260px; color: #6b6858; font-size: 11px;
+      }
       .myoarm-mujoco-stats {
         display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 8px; margin: 14px 0 0;
@@ -468,6 +490,7 @@
         .myoarm-training-state { grid-column: 1 / -1; }
         .myoarm-loss-panel { grid-template-columns: 1fr; }
         .myoarm-mujoco-controls { align-items: stretch; flex-direction: column; }
+        .myoarm-hand-actions { align-items: stretch; flex-direction: column; }
         .myoarm-mujoco-stats { grid-template-columns: 1fr; }
         .myoarm-hand-viewport { height: 360px; }
       }

@@ -5,6 +5,9 @@ import type { ShadowHandModel } from "./shadow-hand-model";
 
 export interface MujocoThreeRenderer {
   sync(): void;
+  setSimulationStep(
+    simulationStep: ((deltaSeconds: number) => void) | null,
+  ): void;
   dispose(): void;
 }
 
@@ -205,7 +208,31 @@ export function createMujocoThreeRenderer(
   resizeObserver.observe(container);
   container.replaceChildren(renderer.domElement);
   resize();
-  renderer.setAnimationLoop(() => {
+  let simulationStep: ((deltaSeconds: number) => void) | null = null;
+  let previousFrameTime: number | null = null;
+  const updateVisualScene = () => {
+    module.mjv_updateScene(
+      model,
+      data,
+      mujocoOption,
+      mujocoPerturb,
+      mujocoCamera,
+      module.mjtCatBit.mjCAT_ALL.value,
+      mujocoScene,
+    );
+    for (const renderedGeom of renderedGeoms) {
+      const geom = mujocoScene.geoms.get(renderedGeom.sceneGeomIndex);
+      if (geom) {
+        applyMujocoTransform(renderedGeom.mesh, geom.pos, geom.mat);
+      }
+    }
+  };
+  renderer.setAnimationLoop((frameTime) => {
+    const deltaSeconds =
+      previousFrameTime === null ? 0 : (frameTime - previousFrameTime) / 1_000;
+    previousFrameTime = frameTime;
+    simulationStep?.(deltaSeconds);
+    updateVisualScene();
     controls.update();
     renderer.render(scene, camera);
   });
@@ -215,21 +242,11 @@ export function createMujocoThreeRenderer(
     sync() {
       if (disposed) return;
       module.mj_forward(model, data);
-      module.mjv_updateScene(
-        model,
-        data,
-        mujocoOption,
-        mujocoPerturb,
-        mujocoCamera,
-        module.mjtCatBit.mjCAT_ALL.value,
-        mujocoScene,
-      );
-      for (const renderedGeom of renderedGeoms) {
-        const geom = mujocoScene.geoms.get(renderedGeom.sceneGeomIndex);
-        if (geom) {
-          applyMujocoTransform(renderedGeom.mesh, geom.pos, geom.mat);
-        }
-      }
+      updateVisualScene();
+    },
+    setSimulationStep(nextSimulationStep) {
+      simulationStep = nextSimulationStep;
+      previousFrameTime = null;
     },
     dispose() {
       if (disposed) return;
