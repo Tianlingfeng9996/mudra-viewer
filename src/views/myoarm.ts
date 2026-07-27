@@ -43,6 +43,7 @@ import {
   loadShadowHandModel,
   type ShadowHandModel,
 } from "../simulation/shadow-hand-model";
+import type { MujocoThreeRenderer } from "../simulation/mujoco-three-renderer";
 
 export interface MyoArmView {
   acceptSamples(chunk: SampleChunk): void;
@@ -265,6 +266,11 @@ export function createMyoArmView(
           MuJoCo is an optional simulation runtime. It is downloaded and initialized
           only after you request it, so data collection and ANN training stay lightweight.
         </p>
+        <div class="myoarm-hand-viewport" data-role="mujoco-viewport">
+          <div class="myoarm-hand-placeholder">
+            Initialize MuJoCo to load and display the Shadow Hand.
+          </div>
+        </div>
         <div class="myoarm-mujoco-controls">
           <button type="button" data-role="initialize-mujoco">Initialize MuJoCo</button>
           <span data-role="mujoco-message">No MuJoCo resources have been requested.</span>
@@ -389,7 +395,10 @@ export function createMyoArmView(
     root.querySelector<HTMLElement>("[data-role=mujoco-version]")!;
   const shadowHandModelEl =
     root.querySelector<HTMLElement>("[data-role=shadow-hand-model]")!;
+  const mujocoViewportEl =
+    root.querySelector<HTMLElement>("[data-role=mujoco-viewport]")!;
   let shadowHandModel: ShadowHandModel | null = null;
+  let mujocoThreeRenderer: MujocoThreeRenderer | null = null;
 
   initializeMujocoButton.addEventListener("click", async () => {
     initializeMujocoButton.disabled = true;
@@ -403,6 +412,13 @@ export function createMyoArmView(
     try {
       const runtime = await loadMujocoRuntime();
       shadowHandModel = await loadShadowHandModel(runtime);
+      const { createMujocoThreeRenderer } =
+        await import("../simulation/mujoco-three-renderer");
+      mujocoThreeRenderer = createMujocoThreeRenderer(
+        mujocoViewportEl,
+        runtime,
+        shadowHandModel,
+      );
       mujocoStateEl.textContent = "Ready";
       initializeMujocoButton.textContent = "Shadow Hand loaded";
       mujocoVersionEl.textContent =
@@ -413,8 +429,10 @@ export function createMyoArmView(
         `${stats.actuators} actuators · ${stats.meshes} meshes`;
       mujocoMessageEl.dataset.status = "ready";
       mujocoMessageEl.textContent =
-        "Model compiled into MjModel/MjData. Rendering is the next milestone.";
+        "Drag to orbit · scroll to zoom · right-drag to pan.";
     } catch (error) {
+      mujocoThreeRenderer?.dispose();
+      mujocoThreeRenderer = null;
       shadowHandModel?.dispose();
       shadowHandModel = null;
       mujocoStateEl.textContent = "Load failed";
@@ -1056,6 +1074,8 @@ export function createMyoArmView(
     },
 
     dispose() {
+      mujocoThreeRenderer?.dispose();
+      mujocoThreeRenderer = null;
       shadowHandModel?.dispose();
       shadowHandModel = null;
     },
