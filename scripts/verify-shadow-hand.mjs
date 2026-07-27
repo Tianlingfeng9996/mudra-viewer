@@ -74,12 +74,19 @@ try {
 
   const lower = [Infinity, Infinity, Infinity];
   const upper = [-Infinity, -Infinity, -Infinity];
+  const visualMeshIds = [];
   for (let geomIndex = 0; geomIndex < visualScene.ngeom; geomIndex++) {
     const geom = visualScene.geoms.get(geomIndex);
     if (!geom || geom.type !== module.mjtGeom.mjGEOM_MESH.value) {
       throw new Error(`Unexpected visual geom at index ${geomIndex}`);
     }
-    const meshId = geom.dataid;
+    const meshId = model.geom_dataid[geom.objid];
+    if (meshId < 0 || meshId >= model.nmesh) {
+      throw new Error(
+        `Visual geom ${geom.objid} references invalid mesh ${meshId}`,
+      );
+    }
+    visualMeshIds.push(meshId);
     const vertexAddress = model.mesh_vertadr[meshId];
     const vertexCount = model.mesh_vertnum[meshId];
     for (let vertexIndex = 0; vertexIndex < vertexCount; vertexIndex++) {
@@ -100,9 +107,23 @@ try {
   }
   const visualSize = upper.map((value, axis) => value - lower[axis]);
   const maxDimension = Math.max(...visualSize);
+  const expectedVisualMeshIds = [
+    0, 1, 3, 4, 5, 6, 7, 8,
+    5, 6, 7, 8, 5, 6, 7, 8,
+    9, 5, 6, 7, 8, 10, 11, 12,
+  ];
+  const hasExpectedAssemblySize =
+    visualSize[0] > 0.4 &&
+    visualSize[0] < 0.5 &&
+    visualSize[1] > 0.15 &&
+    visualSize[1] < 0.2 &&
+    visualSize[2] > 0.1 &&
+    visualSize[2] < 0.16;
   if (
     visualScene.ngeom !== 24 ||
+    JSON.stringify(visualMeshIds) !== JSON.stringify(expectedVisualMeshIds) ||
     !visualSize.every(Number.isFinite) ||
+    !hasExpectedAssemblySize ||
     maxDimension < 0.1 ||
     maxDimension > 1
   ) {
@@ -119,6 +140,7 @@ try {
   console.log("Shadow Hand model verified:", {
     ...actual,
     visualGeoms: visualScene.ngeom,
+    visualMeshIds,
     visualSize,
   });
 } finally {

@@ -112,16 +112,25 @@ export function createMujocoThreeRenderer(
 
   const geometryByMeshId = new Map<number, THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
-  const renderedGeoms: THREE.Mesh[] = [];
+  const renderedGeoms: Array<{
+    mesh: THREE.Mesh;
+    sceneGeomIndex: number;
+  }> = [];
 
   for (let index = 0; index < mujocoScene.ngeom; index++) {
     const geom = mujocoScene.geoms.get(index);
     if (!geom || geom.type !== module.mjtGeom.mjGEOM_MESH.value) continue;
+    const meshId = model.geom_dataid[geom.objid];
+    if (meshId < 0 || meshId >= model.nmesh) {
+      throw new Error(
+        `Visual geom ${geom.objid} references invalid mesh ${meshId}`,
+      );
+    }
 
-    let geometry = geometryByMeshId.get(geom.dataid);
+    let geometry = geometryByMeshId.get(meshId);
     if (!geometry) {
-      geometry = createMeshGeometry(model, geom.dataid);
-      geometryByMeshId.set(geom.dataid, geometry);
+      geometry = createMeshGeometry(model, meshId);
+      geometryByMeshId.set(meshId, geometry);
     }
 
     const material = new THREE.MeshStandardMaterial({
@@ -139,7 +148,7 @@ export function createMujocoThreeRenderer(
     mesh.receiveShadow = true;
     applyMujocoTransform(mesh, geom.pos, geom.mat);
     modelRoot.add(mesh);
-    renderedGeoms.push(mesh);
+    renderedGeoms.push({ mesh, sceneGeomIndex: index });
   }
 
   if (!renderedGeoms.length) {
@@ -215,10 +224,10 @@ export function createMujocoThreeRenderer(
         module.mjtCatBit.mjCAT_ALL.value,
         mujocoScene,
       );
-      for (let index = 0; index < renderedGeoms.length; index++) {
-        const geom = mujocoScene.geoms.get(index);
+      for (const renderedGeom of renderedGeoms) {
+        const geom = mujocoScene.geoms.get(renderedGeom.sceneGeomIndex);
         if (geom) {
-          applyMujocoTransform(renderedGeoms[index], geom.pos, geom.mat);
+          applyMujocoTransform(renderedGeom.mesh, geom.pos, geom.mat);
         }
       }
     },
