@@ -4,6 +4,9 @@ import createMujocoModule from "@mujoco/mujoco";
 import poseConfiguration from "../src/simulation/shadow-hand-poses.json" with {
   type: "json",
 };
+import annControlConfiguration from "../src/simulation/ann-hand-control.json" with {
+  type: "json",
+};
 
 const modelRoot = fileURLToPath(
   new URL("../public/models/shadow-hand/", import.meta.url),
@@ -62,6 +65,20 @@ try {
     poseConfiguration.poses.length !== 3
   ) {
     throw new Error("Unexpected Shadow Hand action preset structure");
+  }
+  const poseNames = new Set(
+    poseConfiguration.poses.map((pose) => pose.name),
+  );
+  if (
+    annControlConfiguration.confidenceThreshold <= 0.5 ||
+    annControlConfiguration.confidenceThreshold >= 1 ||
+    annControlConfiguration.requiredConfirmations < 2 ||
+    !["open", "grasp", "pinch"].every(
+      (label) =>
+        poseNames.has(annControlConfiguration.poseByLabel[label]),
+    )
+  ) {
+    throw new Error("Unexpected ANN-to-Shadow-Hand control configuration");
   }
   const settledPoses = [];
   for (const pose of poseConfiguration.poses) {

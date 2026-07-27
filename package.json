@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node -e \"require('node:fs').copyFileSync('dist/index.html', 'dist/404.html')\"",
     "preview": "vite preview",
+    "verify:hand-control": "node scripts/verify-ann-hand-control.mjs",
     "verify:mujoco": "node scripts/verify-shadow-hand.mjs"
   },
   "dependencies": {

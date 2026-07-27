@@ -50,6 +50,10 @@ import {
   type ShadowHandActionController,
   type ShadowHandPoseName,
 } from "../simulation/shadow-hand-actions";
+import {
+  ANN_HAND_CONTROL_CONFIG,
+  createAnnHandControlGate,
+} from "../simulation/ann-hand-control";
 
 export interface MyoArmView {
   acceptSamples(chunk: SampleChunk): void;
@@ -282,7 +286,11 @@ export function createMyoArmView(
           <span data-role="mujoco-message">No MuJoCo resources have been requested.</span>
         </div>
         <div class="myoarm-hand-actions" aria-label="Independent Shadow Hand action tests">
-          <span>Action test</span>
+          <span>Control</span>
+          <button type="button" data-hand-control-mode="manual" aria-pressed="true" disabled>Manual</button>
+          <button type="button" data-hand-control-mode="ann" aria-pressed="false" disabled>ANN control</button>
+          <span class="myoarm-hand-action-divider" aria-hidden="true"></span>
+          <span>Pose</span>
           ${SHADOW_HAND_POSES.map(
             (pose) =>
               `<button type="button" data-hand-pose="${pose.name}" aria-pressed="false" disabled>${pose.label}</button>`,
@@ -414,13 +422,22 @@ export function createMyoArmView(
   const handActionButtons = Array.from(
     root.querySelectorAll<HTMLButtonElement>("[data-hand-pose]"),
   );
+  const handControlModeButtons = Array.from(
+    root.querySelectorAll<HTMLButtonElement>("[data-hand-control-mode]"),
+  );
   const handActionMessageEl =
     root.querySelector<HTMLElement>("[data-role=hand-action-message]")!;
   let shadowHandModel: ShadowHandModel | null = null;
   let mujocoThreeRenderer: MujocoThreeRenderer | null = null;
   let shadowHandActionController: ShadowHandActionController | null = null;
+  let handControlMode: "manual" | "ann" = "manual";
+  const annHandControlGate = createAnnHandControlGate();
 
-  const selectHandPose = (name: ShadowHandPoseName) => {
+  const selectHandPose = (
+    name: ShadowHandPoseName,
+    source: "manual" | "ann" = "manual",
+    confidence?: number,
+  ) => {
     if (!shadowHandActionController) return;
     shadowHandActionController.setPose(name);
     const pose = SHADOW_HAND_POSES.find((candidate) => candidate.name === name)!;
@@ -429,15 +446,83 @@ export function createMyoArmView(
       button.classList.toggle("selected", selected);
       button.setAttribute("aria-pressed", String(selected));
     }
-    handActionMessageEl.textContent =
-      `Moving to ${pose.label}. MuJoCo is driving all 20 actuators.`;
+    handActionMessageEl.textContent = source === "ann"
+      ? `ANN triggered ${pose.label} at ${((confidence ?? 0) * 100).toFixed(1)}% confidence.`
+      : `Moving to ${pose.label}. MuJoCo is driving all 20 actuators.`;
   };
 
   for (const button of handActionButtons) {
     button.addEventListener("click", () => {
-      selectHandPose(button.dataset.handPose as ShadowHandPoseName);
+      if (handControlMode === "manual") {
+        selectHandPose(button.dataset.handPose as ShadowHandPoseName);
+      }
     });
   }
+
+  const updateHandControlUi = () => {
+    const handReady = Boolean(shadowHandActionController);
+    if (handControlMode === "ann" && !trainedModel) {
+      handControlMode = "manual";
+      annHandControlGate.reset();
+    }
+    for (const button of handControlModeButtons) {
+      const mode = button.dataset.handControlMode as "manual" | "ann";
+      const selected = mode === handControlMode;
+      button.disabled =
+        !handReady || (mode === "ann" && !trainedModel);
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    }
+    for (const button of handActionButtons) {
+      button.disabled = !handReady || handControlMode !== "manual";
+    }
+  };
+
+  const setHandControlMode = (mode: "manual" | "ann") => {
+    if (
+      !shadowHandActionController ||
+      (mode === "ann" && !trainedModel)
+    ) {
+      return;
+    }
+    handControlMode = mode;
+    annHandControlGate.reset();
+    updateHandControlUi();
+    handActionMessageEl.textContent = mode === "ann"
+      ? `ANN control armed: ≥${Math.round(ANN_HAND_CONTROL_CONFIG.confidenceThreshold * 100)}% confidence for ${ANN_HAND_CONTROL_CONFIG.requiredConfirmations} consecutive predictions.`
+      : "Manual control active. Select Open, Grasp, or Pinch.";
+  };
+
+  for (const button of handControlModeButtons) {
+    button.addEventListener("click", () => {
+      setHandControlMode(
+        button.dataset.handControlMode as "manual" | "ann",
+      );
+    });
+  }
+
+  const applyAnnPredictionToHand = (
+    prediction: ClassificationPrediction,
+  ) => {
+    if (handControlMode !== "ann" || !shadowHandActionController) return;
+    const result = annHandControlGate.accept(prediction);
+    const confidence = (result.confidence * 100).toFixed(1);
+    if (result.status === "triggered") {
+      selectHandPose(result.pose, "ann", result.confidence);
+    } else if (result.status === "steady") {
+      handActionMessageEl.textContent =
+        `ANN holding ${result.pose} at ${confidence}% confidence.`;
+    } else if (result.status === "confirming") {
+      handActionMessageEl.textContent =
+        `Confirming ${result.pose}: ${result.confirmationCount}/${result.requiredConfirmations} at ${confidence}%.`;
+    } else if (result.status === "low-confidence") {
+      handActionMessageEl.textContent =
+        `Holding current pose: ${result.label} confidence ${confidence}% is below threshold.`;
+    } else {
+      handActionMessageEl.textContent =
+        `Holding current pose: ${result.label} has no Shadow Hand pose mapping.`;
+    }
+  };
 
   initializeMujocoButton.addEventListener("click", async () => {
     initializeMujocoButton.disabled = true;
@@ -465,7 +550,7 @@ export function createMyoArmView(
       mujocoThreeRenderer.setSimulationStep((deltaSeconds) => {
         shadowHandActionController?.step(deltaSeconds);
       });
-      for (const button of handActionButtons) button.disabled = false;
+      updateHandControlUi();
       selectHandPose("open");
       mujocoStateEl.textContent = "Ready";
       initializeMujocoButton.textContent = "Shadow Hand loaded";
@@ -484,7 +569,7 @@ export function createMyoArmView(
       shadowHandActionController = null;
       shadowHandModel?.dispose();
       shadowHandModel = null;
-      for (const button of handActionButtons) button.disabled = true;
+      updateHandControlUi();
       handActionMessageEl.textContent =
         "Independent actions are unavailable until MuJoCo loads.";
       mujocoStateEl.textContent = "Load failed";
@@ -715,6 +800,7 @@ export function createMyoArmView(
     trainingAbortController = null;
     training = false;
     trainedModel = null;
+    updateHandControlUi();
     trainingHistory = [];
     predictionHistory = [];
     predictionWindowCount = 0;
@@ -800,6 +886,7 @@ export function createMyoArmView(
     trainingAbortController = controller;
     training = true;
     trainedModel = null;
+    updateHandControlUi();
     trainingHistory = [];
     predictionHistory = [];
     predictionWindowCount = 0;
@@ -842,6 +929,7 @@ export function createMyoArmView(
       if (controller.signal.aborted || currentSplit !== splitAtStart) return;
 
       trainedModel = result.model;
+      updateHandControlUi();
       const finalMetrics = result.history[result.history.length - 1];
       const testMetrics = trainedModel.evaluate(
         splitAtStart.partitions.test.windows,
@@ -1116,10 +1204,11 @@ export function createMyoArmView(
         const windows = liveWindowStream.acceptSamples(chunk);
         for (const window of windows) {
           predictionWindowCount++;
-          renderPrediction(
-            smoothPrediction(trainedModel.predict(window.values)),
-            window.endSampleExclusive,
+          const prediction = smoothPrediction(
+            trainedModel.predict(window.values),
           );
+          renderPrediction(prediction, window.endSampleExclusive);
+          applyAnnPredictionToHand(prediction);
         }
       }
       scheduleRender();
@@ -1218,6 +1307,7 @@ export function createMyoArmView(
         liveWindowStream.reset();
         predictionHistory = [];
         predictionWindowCount = 0;
+        annHandControlGate.reset();
         if (trainedModel) {
           renderInferenceIdle(
             `Buffering the first ${PREPROCESSING_CONFIG_V1.windowDurationMs} ms window…`,
@@ -1226,6 +1316,7 @@ export function createMyoArmView(
       } else if (!isActive) {
         liveWindowStream.reset();
         predictionHistory = [];
+        annHandControlGate.reset();
         if (trainedModel) {
           inferenceStateEl.textContent = predictionWindowCount
             ? "Stream finished"

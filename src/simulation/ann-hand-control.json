@@ -1,0 +1,9 @@
+{
+  "confidenceThreshold": 0.65,
+  "requiredConfirmations": 3,
+  "poseByLabel": {
+    "open": "open",
+    "grasp": "grasp",
+    "pinch": "pinch"
+  }
+}
